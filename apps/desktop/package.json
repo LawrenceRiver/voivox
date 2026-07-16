@@ -7,7 +7,7 @@
   "type": "module",
   "main": "dist/electron/main.js",
   "scripts": {
-    "build": "vite build && esbuild electron/main.ts electron/preload.ts --bundle --platform=node --target=node22 --format=esm --external:electron --outdir=dist/electron && mkdir -p dist/resources && cp ../../native/asr/voivox_asr_worker.py dist/resources/ && (cd ../../native/macos && swift build -c release) && cp ../../native/macos/.build/release/voivox-host dist/resources/",
+    "build": "vite build && esbuild electron/main.ts --bundle --platform=node --target=node22 --format=esm --external:electron --outfile=dist/electron/main.js && esbuild electron/preload.ts --bundle --platform=node --target=node22 --format=cjs --external:electron --outfile=dist/electron/preload.js && mkdir -p dist/resources && cp ../../native/asr/voivox_asr_worker.py dist/resources/ && (cd ../../native/macos && swift build -c release) && cp ../../native/macos/.build/release/voivox-host dist/resources/",
     "start": "npm run build && electron dist/electron/main.js",
     "typecheck": "tsc --noEmit",
     "package:dir": "npm run build && electron-builder --dir --mac --arm64 --publish never",
@@ -45,6 +45,9 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
+      "extendInfo": {
+        "NSAudioCaptureUsageDescription": "VOIVOX 需要访问所选应用的音频，以便在本机静音转写。"
+      },
       "target": [
         {
           "target": "dmg",

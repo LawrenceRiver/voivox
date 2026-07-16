@@ -21,6 +21,14 @@
   <img src="docs/assets/voivox-overview.svg" width="100%" alt="VOIVOX：Chrome 扩展、桌面 App 与 Codex MCP 的本机工作流总览" />
 </p>
 
+## Actual source-selection example
+
+<p align="center">
+  <img src="docs/assets/voivox-audio-source-example.jpg" width="720" alt="VOIVOX 的 macOS 音源选择器，显示可供静音收录的 Core Audio 进程" />
+</p>
+
+The picker is populated from Core Audio's active process list rather than every running application, so the chosen source corresponds to an audio-capable process. This public screenshot contains only the VOIVOX interface; it intentionally excludes any captured page, video frame, account, or transcript.
+
 ## What ships
 
 VOIVOX contains three deliberately separate surfaces:

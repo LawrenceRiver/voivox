@@ -7,7 +7,7 @@ import Foundation
 struct VOIVOXHost {
     static func main() {
         do {
-            let command = CommandLine.arguments.dropFirst()
+            let command = Array(CommandLine.arguments.dropFirst())
             guard let action = command.first else {
                 try printJSON(["error": "Use `list` or `record <pid> <output.wav> [--audible]`."])
                 return
@@ -27,20 +27,67 @@ struct VOIVOXHost {
                 throw HostError.invalidArguments
             }
         } catch {
-            FileHandle.standardError.write(Data("VOIVOX host error: \(error)\n".utf8))
+            FileHandle.standardError.write(Data("VOIVOX host error: \(error.localizedDescription)\n".utf8))
             exit(1)
         }
     }
 
     private static func runningApplications() throws -> [[String: Any]] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        let sizeStatus = AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size
+        )
+        guard sizeStatus == noErr else {
+            throw HostError.coreAudio(operation: "AudioObjectGetPropertyDataSize(ProcessObjectList)", status: sizeStatus)
+        }
+        let count = Int(size) / MemoryLayout<AudioObjectID>.size
+        guard count > 0 else { return [] }
+        var processObjectIDs = [AudioObjectID](repeating: kAudioObjectUnknown, count: count)
+        let listStatus = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size,
+            &processObjectIDs
+        )
+        guard listStatus == noErr else {
+            throw HostError.coreAudio(operation: "AudioObjectGetPropertyData(ProcessObjectList)", status: listStatus)
+        }
+
         var result: [[String: Any]] = []
-        for application in NSWorkspace.shared.runningApplications where application.processIdentifier > 0 && !application.isTerminated {
-            let pid = application.processIdentifier
-            let name = application.localizedName ?? "Process \(pid)"
-            let bundleID = application.bundleIdentifier ?? ""
+        for processObjectID in processObjectIDs {
+            var pid = pid_t(0)
+            var pidAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioProcessPropertyPID,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            var pidSize = UInt32(MemoryLayout<pid_t>.size)
+            guard AudioObjectGetPropertyData(
+                processObjectID,
+                &pidAddress,
+                0,
+                nil,
+                &pidSize,
+                &pid
+            ) == noErr, pid > 0 else { continue }
+
+            let application = NSRunningApplication(processIdentifier: pid)
+            let name = application?.localizedName ?? "Audio process \(pid)"
+            let bundleID = application?.bundleIdentifier ?? ""
             result.append(["pid": pid, "name": name, "bundleId": bundleID])
         }
-        return result
+        return result.sorted { ($0["name"] as? String ?? "") < ($1["name"] as? String ?? "") }
     }
 
     private static func record(pid: Int32, outputPath: String, mode: ProcessTapMode) throws {
@@ -71,7 +118,7 @@ struct VOIVOXHost {
 
 private enum HostError: LocalizedError {
     case invalidArguments
-    case coreAudio(OSStatus)
+    case coreAudio(operation: String, status: OSStatus)
     case processUnavailable(Int32)
     case unsupportedFormat
     case unsupportedSystem
@@ -80,8 +127,8 @@ private enum HostError: LocalizedError {
         switch self {
         case .invalidArguments:
             return "Use `list` or `record <pid> <output.wav> [--audible]`."
-        case .coreAudio(let status):
-            return "CoreAudio returned OSStatus \(status). Grant VOIVOX system-audio recording permission in System Settings, then try again."
+        case .coreAudio(let operation, let status):
+            return "CoreAudio returned OSStatus \(status) while calling \(operation). Grant VOIVOX system-audio recording permission in System Settings, then try again."
         case .processUnavailable(let pid):
             return "No CoreAudio process object exists for pid \(pid)."
         case .unsupportedFormat:
@@ -90,6 +137,10 @@ private enum HostError: LocalizedError {
             return "VOIVOX per-app capture requires macOS 14.2 or newer."
         }
     }
+}
+
+func tapInputBuffer(_ inputData: UnsafePointer<AudioBufferList>?) -> UnsafePointer<AudioBufferList>? {
+    inputData
 }
 
 @available(macOS 14.2, *)
@@ -117,10 +168,12 @@ private final class ProcessTapFileRecorder {
         let description = CATapDescription(monoMixdownOfProcesses: [processObjectID])
         description.name = "VOIVOX \(configuration.pid)"
         description.isPrivate = true
-        description.muteBehavior = configuration.keepsPlaybackAudible ? CATapMuteBehavior.unmuted : CATapMuteBehavior.muted
+        description.muteBehavior = configuration.keepsPlaybackAudible
+            ? CATapMuteBehavior.unmuted
+            : CATapMuteBehavior.mutedWhenTapped
         tapDescription = description
 
-        try check(AudioHardwareCreateProcessTap(description, &tapID))
+        try check(AudioHardwareCreateProcessTap(description, &tapID), whileCalling: "AudioHardwareCreateProcessTap")
         let tapUID = try propertyString(objectID: tapID, selector: kAudioTapPropertyUID)
         try createAggregateDevice(tapUID: tapUID)
 
@@ -133,10 +186,12 @@ private final class ProcessTapFileRecorder {
 
         let queue = DispatchQueue(label: "VOIVOX.ProcessTap.IO", qos: .userInitiated)
         try check(AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateDeviceID, queue) { [weak self] _, inputData, _, _, _ in
-            self?.write(inputData)
-        })
-        guard let ioProcID else { throw HostError.coreAudio(kAudioHardwareUnspecifiedError) }
-        try check(AudioDeviceStart(aggregateDeviceID, ioProcID))
+            self?.write(tapInputBuffer(inputData))
+        }, whileCalling: "AudioDeviceCreateIOProcIDWithBlock")
+        guard let ioProcID else {
+            throw HostError.coreAudio(operation: "AudioDeviceCreateIOProcIDWithBlock", status: kAudioHardwareUnspecifiedError)
+        }
+        try check(AudioDeviceStart(aggregateDeviceID, ioProcID), whileCalling: "AudioDeviceStart")
     }
 
     func stop() {
@@ -174,25 +229,25 @@ private final class ProcessTapFileRecorder {
     }
 
     private func translate(pid: Int32) throws -> AudioObjectID {
-        var pid = pid
+        var processID = pid_t(pid)
         var processObjectID = AudioObjectID(kAudioObjectUnknown)
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
-        var size = UInt32(MemoryLayout<AudioValueTranslation>.size)
-        try withUnsafeMutableBytes(of: &pid) { inputBuffer in
-            try withUnsafeMutableBytes(of: &processObjectID) { outputBuffer in
-                var translation = AudioValueTranslation(
-                    mInputData: inputBuffer.baseAddress!,
-                    mInputDataSize: UInt32(MemoryLayout<Int32>.size),
-                    mOutputData: outputBuffer.baseAddress!,
-                    mOutputDataSize: UInt32(MemoryLayout<AudioObjectID>.size)
-                )
-                try check(AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &translation))
-            }
-        }
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        try check(
+            AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                UInt32(MemoryLayout<pid_t>.size),
+                &processID,
+                &size,
+                &processObjectID
+            ),
+            whileCalling: "AudioObjectGetPropertyData(TranslatePIDToProcessObject)"
+        )
         guard processObjectID != AudioObjectID(kAudioObjectUnknown) else { throw HostError.processUnavailable(pid) }
         return processObjectID
     }
@@ -208,7 +263,7 @@ private final class ProcessTapFileRecorder {
                 kAudioSubTapDriftCompensationKey: true
             ]]
         ]
-        try check(AudioHardwareCreateAggregateDevice(properties as CFDictionary, &aggregateDeviceID))
+        try check(AudioHardwareCreateAggregateDevice(properties as CFDictionary, &aggregateDeviceID), whileCalling: "AudioHardwareCreateAggregateDevice")
     }
 
     private func propertyString(objectID: AudioObjectID, selector: AudioObjectPropertySelector) throws -> String {
@@ -216,7 +271,10 @@ private final class ProcessTapFileRecorder {
         var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var size = UInt32(MemoryLayout<CFString?>.size)
         try withUnsafeMutableBytes(of: &value) { buffer in
-            try check(AudioObjectGetPropertyData(objectID, &address, 0, nil, &size, buffer.baseAddress!))
+            try check(
+                AudioObjectGetPropertyData(objectID, &address, 0, nil, &size, buffer.baseAddress!),
+                whileCalling: "AudioObjectGetPropertyData(String)"
+            )
         }
         guard let value else { throw HostError.unsupportedFormat }
         return value as String
@@ -226,12 +284,15 @@ private final class ProcessTapFileRecorder {
         var value = AudioStreamBasicDescription()
         var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-        try check(AudioObjectGetPropertyData(objectID, &address, 0, nil, &size, &value))
+        try check(
+            AudioObjectGetPropertyData(objectID, &address, 0, nil, &size, &value),
+            whileCalling: "AudioObjectGetPropertyData(StreamDescription)"
+        )
         return value
     }
 
-    private func check(_ status: OSStatus) throws {
-        guard status == noErr else { throw HostError.coreAudio(status) }
+    private func check(_ status: OSStatus, whileCalling operation: String) throws {
+        guard status == noErr else { throw HostError.coreAudio(operation: operation, status: status) }
     }
 }
 
