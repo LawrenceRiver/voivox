@@ -1,0 +1,30 @@
+name: Package macOS candidate
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: arm64 package candidate
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run package:mac --workspace=@voivox/desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VOIVOX-macos-arm64-unsigned
+          path: apps/desktop/release/*
+          if-no-files-found: error

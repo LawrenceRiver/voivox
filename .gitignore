@@ -1,0 +1,22 @@
+# Dependencies and generated application output
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+release/
+**/release/
+*.tsbuildinfo
+
+# Native build state
+native/macos/.build/
+
+# Local credentials, runtime data, and operating-system files
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+
+# Editor state
+.idea/
+.vscode/

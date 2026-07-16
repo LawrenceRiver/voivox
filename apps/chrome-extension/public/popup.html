@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="popup.css" />
+    <title>VOIVOX</title>
+  </head>
+  <body>
+    <main>
+      <header><span class="mark">VOI<i>VOX</i></span><span id="state" role="status">正在检查</span></header>
+      <p class="lede">只收录你现在点开的这个标签页，不播放到扬声器。</p>
+      <button id="capture" type="button">开始静音收录</button>
+      <p id="message" class="message" aria-live="polite"></p>
+      <details>
+        <summary>连接本机 App</summary>
+        <p>在桌面 VOIVOX 的 Chrome 连接区复制桥接信息，然后粘贴在这里。</p>
+        <label>本机地址 <input id="base-url" autocomplete="off" inputmode="url" placeholder="http://127.0.0.1:xxxxx" /></label>
+        <label>Chrome 桥接令牌 <input id="bridge-token" autocomplete="off" type="password" /></label>
+        <button id="save" class="secondary" type="button">保存连接</button>
+      </details>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

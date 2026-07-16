@@ -1,0 +1,37 @@
+{
+  "name": "voivox-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local-first macOS audio-to-text workstation with an Electron desktop app, Codex MCP, and Chrome companion.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LawrenceRiver/voivox.git"
+  },
+  "bugs": {
+    "url": "https://github.com/LawrenceRiver/voivox/issues"
+  },
+  "homepage": "https://github.com/LawrenceRiver/voivox#readme",
+  "type": "module",
+  "packageManager": "npm@11.11.1",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "vitest run apps packages",
+    "test:watch": "vitest apps packages",
+    "typecheck": "tsc -b",
+    "build": "npm run build --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.0",
+    "@vitejs/plugin-react": "^5.0.2",
+    "@types/node": "^24.0.0",
+    "electron": "^37.2.6",
+    "esbuild": "^0.25.9",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.8.3",
+    "vite": "^7.1.4",
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "name": "@voivox/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "VOIVOX local-first, silent audio-to-text workstation for macOS.",
+  "author": "VOIVOX contributors",
+  "type": "module",
+  "main": "dist/electron/main.js",
+  "scripts": {
+    "build": "vite build && esbuild electron/main.ts electron/preload.ts --bundle --platform=node --target=node22 --format=esm --external:electron --outdir=dist/electron && mkdir -p dist/resources && cp ../../native/asr/voivox_asr_worker.py dist/resources/ && (cd ../../native/macos && swift build -c release) && cp ../../native/macos/.build/release/voivox-host dist/resources/",
+    "start": "npm run build && electron dist/electron/main.js",
+    "typecheck": "tsc --noEmit",
+    "package:dir": "npm run build && electron-builder --dir --mac --arm64 --publish never",
+    "package:mac": "npm run build && electron-builder --mac dmg zip --arm64 --publish never"
+  },
+  "dependencies": {
+    "@voivox/core": "file:../../packages/core",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "io.voivox.app",
+    "productName": "VOIVOX",
+    "electronVersion": "37.10.3",
+    "asar": true,
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "files": [
+      "dist/electron/**/*",
+      "dist/renderer/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/resources",
+        "to": "voivox"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "build/icon.icns",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    }
+  }
+}

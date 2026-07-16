@@ -1,0 +1,13 @@
+{
+  "name": "@voivox/chrome-extension",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/popup.ts src/service-worker.ts src/offscreen.ts src/audio-worklet.ts --bundle --format=esm --target=chrome116 --outdir=dist && cp public/manifest.json public/popup.html public/popup.css public/offscreen.html dist/",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287"
+  }
+}
