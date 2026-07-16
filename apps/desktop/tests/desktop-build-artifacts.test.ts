@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 const run = promisify(execFile);
 const desktopDirectory = new URL('..', import.meta.url);
+const COLD_DESKTOP_BUILD_TIMEOUT_MS = 120_000;
 
 describe('desktop distribution build', () => {
   it('loads the renderer and sandboxed preload from packaged file URLs', async () => {
@@ -64,5 +65,5 @@ describe('desktop distribution build', () => {
       await expect(access(new URL(`./dist/resources/${license}`, desktopDirectory)))
         .resolves.toBeUndefined();
     }
-  }, 30_000);
+  }, COLD_DESKTOP_BUILD_TIMEOUT_MS);
 });
