@@ -57,7 +57,7 @@ native/asr             local Qwen ASR worker
 ## Requirements
 
 - macOS on Apple Silicon for the bundled selected-process capture host and the MLX ASR runtime.
-- Node 22+ and Swift 5.10+ for development.
+- Node 22+ and Swift 6.0+ for development.
 - Python **3.10+** for local ASR. The machine's default Python may be older; install a newer Python first.
 
 The ASR default is `Qwen/Qwen3-ASR-0.6B` through `mlx-qwen3-asr`. It is a local, open-weight model and is not committed to this repository; download happens only after the user chooses to install the local runtime. The App is deliberately independent from system dictation, Doubao, WeChat, and any other input method, so normal voice typing keeps working elsewhere.
