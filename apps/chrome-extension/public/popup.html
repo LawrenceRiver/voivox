@@ -7,18 +7,56 @@
     <title>VOIVOX</title>
   </head>
   <body>
-    <main>
-      <header><span class="mark">VOI<i>VOX</i></span><span id="state" role="status">正在检查</span></header>
-      <p class="lede">只收录你现在点开的这个标签页，不播放到扬声器。</p>
-      <button id="capture" type="button">开始静音收录</button>
-      <p id="message" class="message" aria-live="polite"></p>
-      <details>
-        <summary>连接本机 App</summary>
-        <p>在桌面 VOIVOX 的 Chrome 连接区复制桥接信息，然后粘贴在这里。</p>
-        <label>本机地址 <input id="base-url" autocomplete="off" inputmode="url" placeholder="http://127.0.0.1:xxxxx" /></label>
-        <label>Chrome 桥接令牌 <input id="bridge-token" autocomplete="off" type="password" /></label>
-        <button id="save" class="secondary" type="button">保存连接</button>
-      </details>
+    <main class="popup-shell">
+      <header class="brand-bar">
+        <div class="brand-lockup">
+          <img alt="" height="42" src="icon.png" width="42" />
+          <div><strong>VOIVOX</strong><span>LOCAL AUDIO NOTES</span></div>
+        </div>
+        <button aria-label="Switch language" class="language-button" id="language" type="button">EN</button>
+      </header>
+
+      <section class="recorder-card" aria-labelledby="capture-heading">
+        <p class="status-line"><span aria-hidden="true" id="status-dot"></span><span id="state" role="status">正在检查…</span></p>
+        <h1 id="capture-heading">把这个标签页<br />变成文字</h1>
+        <p class="message" id="message" aria-live="polite"></p>
+
+        <div class="sound-ribbon" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <div class="progress-track" id="progress-track" hidden><span id="progress-bar"></span></div>
+
+        <button class="capture-button" id="capture" type="button">转写当前标签页</button>
+
+        <fieldset class="mode-fieldset">
+          <legend id="mode-label">本地模型</legend>
+          <div class="mode-switch">
+            <button id="mode-fast" type="button" aria-pressed="false"><strong>快速</strong><span>约 45 MB</span></button>
+            <button id="mode-quality" type="button" aria-pressed="true"><strong>高质量</strong><span>约 80 MB</span></button>
+          </div>
+          <p id="mode-hint"></p>
+        </fieldset>
+
+        <div class="route-note">
+          <span aria-hidden="true">↳</span>
+          <p><strong id="route-label">浏览器本地模型</strong><small id="route-hint">不需要 App，也不需要 API。</small></p>
+        </div>
+      </section>
+
+      <section class="transcript-card" aria-labelledby="transcript-heading">
+        <div class="section-heading">
+          <h2 id="transcript-heading">原始转写</h2>
+          <button class="text-button" id="copy" type="button" disabled>复制文字</button>
+        </div>
+        <p class="transcript-empty" id="transcript-empty">开始收录后，文字会出现在这里。</p>
+        <pre id="transcript" hidden></pre>
+        <button class="retry-button" id="retry" type="button" hidden>重试</button>
+      </section>
+
+      <footer>
+        <span id="privacy">音频和文字只在这台设备上处理。</span>
+        <span id="limit">单次最多 10 分钟</span>
+      </footer>
     </main>
     <script type="module" src="popup.js"></script>
   </body>

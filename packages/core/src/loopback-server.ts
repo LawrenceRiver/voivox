@@ -1,17 +1,28 @@
+import { createHmac } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 
 import { type CaptureSession, VoivoxService } from './voivox-service.js';
 
+export const VOIVOX_EXTENSION_ORIGIN = 'chrome-extension://pepfpbobjbjehhhcjiokmneclohlffno';
+export const VOIVOX_VERSION = '0.1.0';
+const NATIVE_PROOF_PATH = '/v1/native/proof';
+const NATIVE_PROOF_PROTOCOL_VERSION = 1;
+const NATIVE_PROOF_CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
+const MCP_PROOF_PATH = '/v1/mcp/proof';
+const MCP_PROOF_PROTOCOL_VERSION = 1;
+const MCP_PROOF_CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
+const MAXIMUM_JSON_BODY_BYTES = 1_500_000;
+
+export type LocalAsrStatus = 'checking' | 'ready' | 'missing';
+
+export type VoivoxCapabilities = {
+  extensionDiscovery: boolean;
+  localAsr: LocalAsrStatus;
+};
+
 export type VoivoxLoopbackServer = {
   baseUrl: string;
   close: () => Promise<void>;
-};
-
-export type ChromeAudioChunk = {
-  sessionId: string;
-  pcm: Uint8Array;
-  sampleRate: 16_000;
-  channels: 1;
 };
 
 export type MacAudioProcess = {
@@ -22,82 +33,128 @@ export type MacAudioProcess = {
 
 export async function createVoivoxLoopbackServer(options: {
   token: string;
+  port?: number;
   service?: VoivoxService;
   extensionToken?: string;
+  capabilities?: VoivoxCapabilities | (() => VoivoxCapabilities);
   listMacProcesses?: () => Promise<MacAudioProcess[]>;
-  onAudioChunk?: (chunk: ChromeAudioChunk) => void | Promise<void>;
   onCaptureStarted?: (session: CaptureSession) => void | Promise<void>;
   onCaptureStopping?: (sessionId: string) => void | Promise<void>;
 }): Promise<VoivoxLoopbackServer> {
   const service = options.service ?? new VoivoxService();
-  const chromeSessionIds = new Set<string>();
+  let actualBaseUrl: string | undefined;
   const server = createServer(async (request, response) => {
     try {
       if (request.method === 'GET' && request.url === '/health') {
-        sendJson(response, 200, { service: 'voivox', status: 'ready' });
+        if (request.headers.origin === VOIVOX_EXTENSION_ORIGIN) {
+          applyExtensionCors(response);
+        }
+        sendJson(response, 200, {
+          service: 'voivox',
+          status: 'ready',
+          version: VOIVOX_VERSION,
+          capabilities: resolveCapabilities(options.capabilities)
+        });
+        return;
+      }
+
+      const requestUrl = request.url
+        ? new URL(request.url, 'http://127.0.0.1')
+        : undefined;
+      if (requestUrl?.pathname === MCP_PROOF_PATH) {
+        if (request.method !== 'GET') {
+          response.setHeader('allow', 'GET');
+          sendJson(response, 405, { error: 'VOIVOX MCP proof requires GET.' });
+          return;
+        }
+        const challenge = parseMcpProofChallenge(requestUrl);
+        if (!challenge) {
+          sendJson(response, 400, { error: 'A valid VOIVOX MCP proof challenge is required.' });
+          return;
+        }
+        if (!actualBaseUrl) {
+          sendJson(response, 503, { error: 'VOIVOX MCP proof is unavailable.' });
+          return;
+        }
+
+        const proof = createHmac('sha256', options.token)
+          .update(mcpProofMessage(challenge, actualBaseUrl))
+          .digest('base64url');
+        response.setHeader('cache-control', 'no-store');
+        sendJson(response, 200, {
+          baseUrl: actualBaseUrl,
+          proof,
+          protocolVersion: MCP_PROOF_PROTOCOL_VERSION,
+          service: 'voivox',
+          status: 'ready'
+        });
+        return;
+      }
+      if (requestUrl?.pathname === NATIVE_PROOF_PATH) {
+        if (request.method !== 'GET') {
+          response.setHeader('allow', 'GET');
+          sendJson(response, 405, { error: 'VOIVOX native proof requires GET.' });
+          return;
+        }
+        const challenge = parseNativeProofChallenge(requestUrl);
+        if (!challenge) {
+          sendJson(response, 400, { error: 'A valid VOIVOX native proof challenge is required.' });
+          return;
+        }
+        if (!options.extensionToken || !actualBaseUrl) {
+          sendJson(response, 503, { error: 'VOIVOX native proof is unavailable.' });
+          return;
+        }
+
+        const proof = createHmac('sha256', options.extensionToken)
+          .update(nativeProofMessage(challenge, actualBaseUrl))
+          .digest('base64url');
+        response.setHeader('cache-control', 'no-store');
+        sendJson(response, 200, {
+          baseUrl: actualBaseUrl,
+          proof,
+          protocolVersion: NATIVE_PROOF_PROTOCOL_VERSION,
+          service: 'voivox',
+          status: 'ready'
+        });
         return;
       }
 
       if (request.url?.startsWith('/v1/extension/')) {
-        if (!options.extensionToken || !isAuthorized(request, options.extensionToken)) {
-          sendJson(response, 401, { error: 'VOIVOX Chrome bridge token required.' });
+        if (request.headers.origin !== VOIVOX_EXTENSION_ORIGIN) {
+          sendJson(response, 403, { error: 'This VOIVOX extension origin is not allowed.' });
           return;
         }
+        applyExtensionCors(response);
 
-        if (request.method === 'POST' && request.url === '/v1/extension/captures') {
-          const body = await readJson(request);
-          const source = body.source;
-          if (!isCaptureSource(source) || source.kind !== 'chrome-tab') {
-            sendJson(response, 400, { error: 'Chrome bridge can only capture the explicitly selected Chrome tab.' });
-            return;
-          }
-
-          const session = service.startCapture(source);
-          chromeSessionIds.add(session.id);
-          sendJson(response, 201, session);
-          return;
-        }
-
-        const audioMatch = request.url.match(/^\/v1\/extension\/captures\/([^/]+)\/audio$/);
-        if (request.method === 'POST' && audioMatch) {
-          const sessionId = decodeURIComponent(audioMatch[1]!);
-          if (!chromeSessionIds.has(sessionId)) {
-            sendJson(response, 404, { error: 'VOIVOX Chrome capture was not found.' });
-            return;
-          }
-          const body = await readJson(request);
-          if (!isChromeAudioBody(body)) {
-            sendJson(response, 400, { error: 'Chrome bridge requires 16 kHz mono pcm-s16le audio.' });
-            return;
-          }
-
-          const pcm = Buffer.from(body.data, 'base64');
-          if (pcm.length === 0) {
-            sendJson(response, 400, { error: 'Chrome bridge audio chunk was empty.' });
-            return;
-          }
-          await options.onAudioChunk?.({
-            sessionId,
-            pcm: new Uint8Array(pcm),
-            sampleRate: 16_000,
-            channels: 1
-          });
+        if (request.method === 'OPTIONS') {
           response.writeHead(204);
           response.end();
           return;
         }
 
-        const extensionStopMatch = request.url.match(/^\/v1\/extension\/captures\/([^/]+)\/stop$/);
-        if (request.method === 'POST' && extensionStopMatch) {
-          const sessionId = decodeURIComponent(extensionStopMatch[1]!);
-          if (!chromeSessionIds.has(sessionId)) {
-            sendJson(response, 404, { error: 'VOIVOX Chrome capture was not found.' });
+        if (!options.extensionToken || !isAuthorized(request, options.extensionToken)) {
+          sendJson(response, 401, { error: 'VOIVOX Chrome bridge token required.' });
+          return;
+        }
+
+        if (request.method === 'POST' && request.url === '/v1/extension/transcripts') {
+          const body = await readJson(request);
+          if (!isBrowserTranscriptImport(body)) {
+            sendJson(response, 400, {
+              error: 'VOIVOX browser transcript import requires a Chrome tab, local text, and a duration up to 10 minutes.'
+            });
             return;
           }
-          await options.onCaptureStopping?.(sessionId);
-          const session = service.stopCapture(sessionId);
-          chromeSessionIds.delete(sessionId);
-          sendJson(response, 200, session);
+
+          sendJson(
+            response,
+            201,
+            service.importCompletedCapture(
+              body.source,
+              [{ startMs: 0, endMs: body.durationMs, text: body.transcript }]
+            )
+          );
           return;
         }
 
@@ -171,7 +228,6 @@ export async function createVoivoxLoopbackServer(options: {
         const sessionId = decodeURIComponent(stopMatch[1]!);
         await options.onCaptureStopping?.(sessionId);
         const session = service.stopCapture(sessionId);
-        chromeSessionIds.delete(sessionId);
         sendJson(response, 200, session);
         return;
       }
@@ -225,17 +281,60 @@ export async function createVoivoxLoopbackServer(options: {
     }
   });
 
-  await listen(server);
+  await listen(server, options.port ?? 0);
   const address = server.address();
 
   if (!address || typeof address === 'string') {
     throw new Error('VOIVOX loopback server did not expose a TCP address.');
   }
 
+  actualBaseUrl = `http://127.0.0.1:${address.port}`;
   return {
-    baseUrl: `http://127.0.0.1:${address.port}`,
+    baseUrl: actualBaseUrl,
     close: () => close(server)
   };
+}
+
+function parseMcpProofChallenge(url: URL): string | undefined {
+  const entries = [...url.searchParams.entries()];
+  if (entries.length !== 1 || entries[0]?.[0] !== 'challenge') {
+    return undefined;
+  }
+  const challenge = entries[0][1];
+  return MCP_PROOF_CHALLENGE.test(challenge) ? challenge : undefined;
+}
+
+function mcpProofMessage(challenge: string, baseUrl: string): string {
+  return `voivox-mcp-proof\n${MCP_PROOF_PROTOCOL_VERSION}\n${challenge}\n${baseUrl}`;
+}
+
+function parseNativeProofChallenge(url: URL): string | undefined {
+  const entries = [...url.searchParams.entries()];
+  if (entries.length !== 1 || entries[0]?.[0] !== 'challenge') {
+    return undefined;
+  }
+  const challenge = entries[0][1];
+  return NATIVE_PROOF_CHALLENGE.test(challenge) ? challenge : undefined;
+}
+
+function nativeProofMessage(challenge: string, baseUrl: string): string {
+  return `voivox-native-proof\n${NATIVE_PROOF_PROTOCOL_VERSION}\n${challenge}\n${baseUrl}`;
+}
+
+function resolveCapabilities(
+  capabilities: VoivoxCapabilities | (() => VoivoxCapabilities) | undefined
+): VoivoxCapabilities {
+  const resolved = typeof capabilities === 'function'
+    ? capabilities()
+    : capabilities ?? { extensionDiscovery: false, localAsr: 'missing' };
+  return { ...resolved };
+}
+
+function applyExtensionCors(response: ServerResponse): void {
+  response.setHeader('access-control-allow-origin', VOIVOX_EXTENSION_ORIGIN);
+  response.setHeader('access-control-allow-methods', 'POST, OPTIONS');
+  response.setHeader('access-control-allow-headers', 'authorization, content-type');
+  response.setHeader('vary', 'Origin');
 }
 
 function isAuthorized(request: IncomingMessage, token: string): boolean {
@@ -300,24 +399,31 @@ function isDerivedTranscript(value: unknown): value is {
   );
 }
 
-function isChromeAudioBody(value: unknown): value is {
-  encoding: 'pcm-s16le';
-  sampleRate: 16_000;
-  channels: 1;
-  data: string;
+function isBrowserTranscriptImport(value: unknown): value is {
+  source: { kind: 'chrome-tab'; label: string };
+  durationMs: number;
+  transcript: string;
 } {
   if (!value || typeof value !== 'object') {
     return false;
   }
 
-  const audio = value as { encoding?: unknown; sampleRate?: unknown; channels?: unknown; data?: unknown };
+  const body = value as {
+    source?: unknown;
+    durationMs?: unknown;
+    transcript?: unknown;
+  };
   return (
-    audio.encoding === 'pcm-s16le' &&
-    audio.sampleRate === 16_000 &&
-    audio.channels === 1 &&
-    typeof audio.data === 'string' &&
-    audio.data.length > 0 &&
-    audio.data.length <= 1_000_000
+    isCaptureSource(body.source) &&
+    body.source.kind === 'chrome-tab' &&
+    body.source.label.length <= 200 &&
+    typeof body.durationMs === 'number' &&
+    Number.isInteger(body.durationMs) &&
+    body.durationMs >= 0 &&
+    body.durationMs <= 600_000 &&
+    typeof body.transcript === 'string' &&
+    body.transcript.trim().length > 0 &&
+    body.transcript.length <= 200_000
   );
 }
 
@@ -339,9 +445,18 @@ function formatTime(totalMs: number): string {
 }
 
 async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+  const declaredLength = Number(request.headers['content-length']);
+  if (Number.isFinite(declaredLength) && declaredLength > MAXIMUM_JSON_BODY_BYTES) {
+    throw new Error('VOIVOX JSON request body is too large.');
+  }
   let body = '';
+  let bodyBytes = 0;
 
   for await (const chunk of request) {
+    bodyBytes += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.byteLength;
+    if (bodyBytes > MAXIMUM_JSON_BODY_BYTES) {
+      throw new Error('VOIVOX JSON request body is too large.');
+    }
     body += chunk;
   }
 
@@ -362,10 +477,10 @@ function sendJson(response: ServerResponse, statusCode: number, body: unknown): 
   response.end(JSON.stringify(body));
 }
 
-function listen(server: Server): Promise<void> {
+function listen(server: Server, port: number): Promise<void> {
   return new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(port, '127.0.0.1', () => {
       server.off('error', reject);
       resolve();
     });

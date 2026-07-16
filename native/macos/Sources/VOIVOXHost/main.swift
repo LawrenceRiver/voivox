@@ -104,15 +104,126 @@ struct VOIVOXHost {
             "mode": mode.rawValue
         ])
 
+        let stop = RecordingStopCoordinator(
+            teardown: { recorder.stop() },
+            completion: {
+                try? printJSON(["event": "stopped", "output": outputPath])
+                exit(0)
+            }
+        )
         let interrupt = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
         signal(SIGINT, SIG_IGN)
         interrupt.setEventHandler {
-            recorder.stop()
-            try? printJSON(["event": "stopped", "output": outputPath])
-            exit(0)
+            stop.requestStop()
+        }
+        let parentPipe = StandardInputEOFMonitor(input: .standardInput, queue: .main) {
+            stop.requestStop()
         }
         interrupt.resume()
-        RunLoop.current.run()
+        parentPipe.start()
+        withExtendedLifetime((interrupt, parentPipe, stop)) {
+            RunLoop.current.run()
+        }
+    }
+}
+
+final class RecordingStopCoordinator {
+    private let completion: () -> Void
+    private var didStop = false
+    private let lock = NSLock()
+    private let teardown: () -> Void
+
+    init(teardown: @escaping () -> Void, completion: @escaping () -> Void) {
+        self.teardown = teardown
+        self.completion = completion
+    }
+
+    func requestStop() {
+        lock.lock()
+        guard !didStop else {
+            lock.unlock()
+            return
+        }
+        didStop = true
+        lock.unlock()
+
+        teardown()
+        completion()
+    }
+}
+
+final class StandardInputEOFMonitor {
+    private var didFinish = false
+    private let input: FileHandle
+    private let lock = NSLock()
+    private let onEOF: () -> Void
+    private let queue: DispatchQueue
+    private var source: DispatchSourceRead?
+
+    init(input: FileHandle, queue: DispatchQueue, onEOF: @escaping () -> Void) {
+        self.input = input
+        self.queue = queue
+        self.onEOF = onEOF
+    }
+
+    deinit {
+        cancel()
+    }
+
+    func start() {
+        lock.lock()
+        guard source == nil, !didFinish else {
+            lock.unlock()
+            return
+        }
+        let source = DispatchSource.makeReadSource(
+            fileDescriptor: input.fileDescriptor,
+            queue: queue
+        )
+        self.source = source
+        lock.unlock()
+
+        source.setEventHandler { [weak self] in
+            self?.handleReadableInput()
+        }
+        source.resume()
+    }
+
+    func cancel() {
+        lock.lock()
+        guard !didFinish else {
+            lock.unlock()
+            return
+        }
+        didFinish = true
+        let source = source
+        self.source = nil
+        lock.unlock()
+        source?.cancel()
+    }
+
+    private func handleReadableInput() {
+        let reachedEOF: Bool
+        do {
+            reachedEOF = try input.read(upToCount: 1)?.isEmpty ?? true
+        } catch {
+            reachedEOF = true
+        }
+        guard reachedEOF else {
+            return
+        }
+
+        lock.lock()
+        guard !didFinish else {
+            lock.unlock()
+            return
+        }
+        didFinish = true
+        let source = source
+        self.source = nil
+        lock.unlock()
+        source?.cancel()
+        onEOF()
     }
 }
 

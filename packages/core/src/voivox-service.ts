@@ -100,6 +100,33 @@ export class VoivoxService {
     return this.copySession(session);
   }
 
+  importCompletedCapture(source: CaptureSource, rawSegments: RawSegment[]): CaptureSession {
+    if (
+      rawSegments.length === 0
+      || rawSegments.some((segment) => !segment.text.trim())
+    ) {
+      throw new Error('A completed capture requires transcript text.');
+    }
+
+    const completedAt = this.clock().toISOString();
+    const session: CaptureSession = {
+      id: `session_${this.nextId++}`,
+      source: { ...source },
+      status: 'complete',
+      createdAt: completedAt,
+      stoppedAt: completedAt,
+      rawSegments: rawSegments.map((segment) => ({
+        ...segment,
+        text: segment.text.trim()
+      })),
+      derivedTranscripts: []
+    };
+
+    this.sessions.set(session.id, session);
+    this.persist();
+    return this.copySession(session);
+  }
+
   getActiveSession(): CaptureSession | undefined {
     return this.activeSessionId ? this.getSession(this.activeSessionId) : undefined;
   }

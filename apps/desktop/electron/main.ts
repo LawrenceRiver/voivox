@@ -4,21 +4,38 @@ import { dirname, join } from 'node:path';
 
 import { app, BrowserWindow, ipcMain } from 'electron';
 
-import { createVoivoxLoopbackServer, JsonSessionStore, VoivoxService } from '@voivox/core';
+import {
+  createVoivoxLoopbackServer,
+  JsonSessionStore,
+  VoivoxService,
+  type VoivoxCapabilities
+} from '@voivox/core';
 import { BufferedAsrPipeline } from '../src/main/asr-pipeline.js';
 import { DesktopRuntime } from '../src/main/desktop-runtime.js';
+import { startLocalAsrCapabilityProbe } from '../src/main/local-asr-capability.js';
+import { startWithExtensionDiscovery } from '../src/main/local-discovery.js';
 import { MacProcessTapHost } from '../src/main/mac-process-tap-host.js';
+import { removeMcpConnectionFileBestEffort } from '../src/main/mcp-connection.js';
+import {
+  createExtensionConnectionPublisher,
+  installNativeMessagingHost,
+  type ExtensionConnectionPublisher
+} from '../src/main/native-messaging.js';
 import { PythonQwenAsrEngine } from '../src/main/python-qwen-asr-engine.js';
 import { resolvePythonCommand } from '../src/main/python-runtime.js';
+import { enforceSingleInstance } from '../src/main/single-instance.js';
 import { readWavDuration } from '../src/main/wav-duration.js';
-import { resolveBundledResource } from './resource-paths.js';
+import { resolveBundledResource, resolveElectronEntryPoints } from './resource-paths.js';
 
 app.setName('VOIVOX');
 let window: BrowserWindow | undefined;
 let loopback: Awaited<ReturnType<typeof createVoivoxLoopbackServer>> | undefined;
 let asrEngine: PythonQwenAsrEngine | undefined;
 let macProcessTapHost: MacProcessTapHost | undefined;
+let extensionConnectionPublisher: ExtensionConnectionPublisher | undefined;
+let mcpConnectionFilePath: string | undefined;
 let isShuttingDown = false;
+const isPrimaryInstance = enforceSingleInstance(app, () => window);
 
 async function bootstrap(): Promise<void> {
   const dataPath = app.getPath('userData');
@@ -27,8 +44,11 @@ async function bootstrap(): Promise<void> {
   );
   const token = randomBytes(32).toString('base64url');
   const chromeBridgeToken = await getOrCreateToken(join(dataPath, 'chrome-bridge-token'));
+  let nativeMessagingReady = false;
+  const pythonCommand = resolvePythonCommand(dataPath, process.env.VOIVOX_PYTHON);
+  const localAsrProbe = startLocalAsrCapabilityProbe(pythonCommand);
   asrEngine = new PythonQwenAsrEngine({
-    pythonCommand: resolvePythonCommand(dataPath, process.env.VOIVOX_PYTHON),
+    pythonCommand,
     workerPath: resolveBundledResource('voivox_asr_worker.py', {
       isPackaged: app.isPackaged,
       moduleUrl: import.meta.url,
@@ -79,27 +99,62 @@ async function bootstrap(): Promise<void> {
       await transcribeProcessRecording(sessionId, recordingPath);
     }
   };
-  loopback = await createVoivoxLoopbackServer({
-    token,
-    extensionToken: chromeBridgeToken,
-    service: runtime.getService(),
-    listMacProcesses: () => processTapHost.listProcesses(),
-    onAudioChunk: (chunk) => asrPipeline.ingest(chunk),
-    onCaptureStarted: async (session) => {
-      if (session.source.kind !== 'macos-process') {
-        return;
-      }
-      if (!session.source.processId) {
-        throw new Error('Choose a macOS app process before starting capture.');
-      }
-      await processTapHost.start(session.id, session.source.processId);
-    },
-    onCaptureStopping: stopLocalCapture
+  const started = await startWithExtensionDiscovery(({ port }) =>
+    createVoivoxLoopbackServer({
+      token,
+      port,
+      extensionToken: chromeBridgeToken,
+      capabilities: () => ({
+        extensionDiscovery: nativeMessagingReady,
+        localAsr: localAsrProbe.getStatus()
+      }),
+      service: runtime.getService(),
+      listMacProcesses: () => processTapHost.listProcesses(),
+      onCaptureStarted: async (session) => {
+        if (session.source.kind !== 'macos-process') {
+          return;
+        }
+        if (!session.source.processId) {
+          throw new Error('Choose a macOS app process before starting capture.');
+        }
+        await processTapHost.start(session.id, session.source.processId);
+      },
+      onCaptureStopping: stopLocalCapture
+    })
+  );
+  loopback = started.server;
+  const getCapabilities = (): VoivoxCapabilities => ({
+    extensionDiscovery: nativeMessagingReady,
+    localAsr: localAsrProbe.getStatus()
   });
-  await writeMcpConnectionFile(dataPath, loopback.baseUrl, token);
+  mcpConnectionFilePath = await writeMcpConnectionFile(dataPath, loopback.baseUrl, token);
+  const nativeMessagingHostPath = resolveBundledResource('voivox-native-host', {
+    isPackaged: app.isPackaged,
+    moduleUrl: import.meta.url,
+    resourcesPath: process.resourcesPath
+  });
+  const nativeMessagingInstallation = await installNativeMessagingHost({
+    executablePath: nativeMessagingHostPath,
+    homeDirectory: app.getPath('home')
+  });
+  nativeMessagingReady = nativeMessagingInstallation.installed.length > 0;
+  for (const failure of nativeMessagingInstallation.failed) {
+    console.warn(`VOIVOX could not install a browser native host manifest at ${failure.path}: ${failure.reason}`);
+  }
+  extensionConnectionPublisher = createExtensionConnectionPublisher({
+    baseUrl: loopback.baseUrl,
+    dataPath,
+    extensionToken: chromeBridgeToken
+  });
+  await extensionConnectionPublisher.publish(localAsrProbe.getStatus());
+  void localAsrProbe.completion
+    .then((localAsr) => extensionConnectionPublisher?.publish(localAsr))
+    .catch((error: unknown) => {
+      console.error('VOIVOX could not update extension discovery:', error);
+    });
   registerIpc(runtime, {
     asrPipeline,
-    chromeBridgeToken,
+    getCapabilities,
     onCaptureStopping: stopLocalCapture,
     processTapHost
   });
@@ -110,11 +165,12 @@ function registerIpc(
   runtime: DesktopRuntime,
   options: {
     asrPipeline: BufferedAsrPipeline;
-    chromeBridgeToken: string;
+    getCapabilities: () => VoivoxCapabilities;
     onCaptureStopping: (sessionId: string) => Promise<void>;
     processTapHost: MacProcessTapHost;
   }
 ): void {
+  ipcMain.handle('voivox:get-capabilities', () => options.getCapabilities());
   ipcMain.handle('voivox:get-dashboard', () => runtime.getDashboard());
   ipcMain.handle('voivox:set-capture-mode', (_event, mode: unknown) => {
     if (mode !== 'fast' && mode !== 'normal') {
@@ -152,15 +208,10 @@ function registerIpc(
     }
     runtime.appendDemoSegment(sessionId);
   });
-  ipcMain.handle('voivox:get-chrome-bridge', () => {
-    if (!loopback) {
-      throw new Error('VOIVOX local bridge is not ready.');
-    }
-    return { baseUrl: loopback.baseUrl, token: options.chromeBridgeToken };
-  });
 }
 
 function createWindow(): void {
+  const entryPoints = resolveElectronEntryPoints(import.meta.url);
   window = new BrowserWindow({
     backgroundColor: '#f3f4f0',
     height: 760,
@@ -172,16 +223,16 @@ function createWindow(): void {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      preload: new URL('./preload.js', import.meta.url).pathname,
+      preload: entryPoints.preload,
       sandbox: true
     }
   });
 
   window.once('ready-to-show', () => window?.show());
-  void window.loadFile(new URL('../renderer/index.html', import.meta.url).pathname);
+  void window.loadFile(entryPoints.renderer);
 }
 
-async function writeMcpConnectionFile(directory: string, baseUrl: string, token: string): Promise<void> {
+async function writeMcpConnectionFile(directory: string, baseUrl: string, token: string): Promise<string> {
   await mkdir(directory, { recursive: true });
   const connectionFile = join(directory, 'mcp-connection.json');
   await writeFile(
@@ -190,6 +241,7 @@ async function writeMcpConnectionFile(directory: string, baseUrl: string, token:
     { encoding: 'utf8', mode: 0o600 }
   );
   await chmod(connectionFile, 0o600);
+  return connectionFile;
 }
 
 async function getOrCreateToken(filePath: string): Promise<string> {
@@ -226,28 +278,37 @@ function assertSource(value: unknown): { kind: 'chrome-tab' | 'macos-process' | 
   return { kind: source.kind, label: source.label, processId: source.processId as number | undefined };
 }
 
-app.whenReady().then(bootstrap).catch((error: unknown) => {
-  console.error('VOIVOX could not start.', error);
-  app.quit();
-});
+if (isPrimaryInstance) {
+  app.whenReady().then(bootstrap).catch((error: unknown) => {
+    console.error('VOIVOX could not start.', error);
+    app.quit();
+  });
 
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
-});
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
 
-app.on('before-quit', (event) => {
-  if (isShuttingDown) {
-    return;
-  }
-  event.preventDefault();
-  isShuttingDown = true;
-  void shutdown().finally(() => app.exit());
-});
+  app.on('before-quit', (event) => {
+    if (isShuttingDown) {
+      return;
+    }
+    event.preventDefault();
+    isShuttingDown = true;
+    void shutdown().finally(() => app.exit());
+  });
+}
+
+function reportShutdownError(error: unknown): void {
+  console.error('VOIVOX shutdown cleanup failed:', error);
+}
 
 async function shutdown(): Promise<void> {
-  await macProcessTapHost?.discardAll();
-  await loopback?.close();
-  asrEngine?.close();
+  await removeMcpConnectionFileBestEffort(mcpConnectionFilePath).catch(reportShutdownError);
+  mcpConnectionFilePath = undefined;
+  await extensionConnectionPublisher?.invalidate().catch(reportShutdownError);
+  await asrEngine?.close().catch(reportShutdownError);
+  await macProcessTapHost?.discardAll().catch(reportShutdownError);
+  await loopback?.close().catch(reportShutdownError);
 }

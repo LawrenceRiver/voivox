@@ -18,7 +18,7 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "vitest run apps packages",
+    "test": "vitest run apps packages && node --test scripts/*.test.mjs",
     "test:watch": "vitest apps packages",
     "typecheck": "tsc -b",
     "build": "npm run build --workspaces --if-present"

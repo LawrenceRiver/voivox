@@ -44,50 +44,6 @@ export class StreamingDownsampler {
   }
 }
 
-export function float32ToPcm16(samples: Float32Array): Uint8Array {
-  const bytes = new Uint8Array(samples.length * 2);
-  const view = new DataView(bytes.buffer);
-
-  samples.forEach((sample, index) => {
-    const clamped = Math.max(-1, Math.min(1, sample));
-    const value = clamped < 0 ? Math.round(clamped * 0x8000) : Math.round(clamped * 0x7fff);
-    view.setInt16(index * 2, value, true);
-  });
-
-  return bytes;
-}
-
-export function downsampleTo16k(samples: Float32Array, sourceRate: number): Float32Array {
-  if (sourceRate === TARGET_SAMPLE_RATE) {
-    return samples.slice();
-  }
-
-  const outputLength = Math.max(1, Math.floor(samples.length * (TARGET_SAMPLE_RATE / sourceRate)));
-  const output = new Float32Array(outputLength);
-  const ratio = sourceRate / TARGET_SAMPLE_RATE;
-
-  for (let index = 0; index < outputLength; index += 1) {
-    const start = Math.floor(index * ratio);
-    const end = Math.min(samples.length, Math.max(start + 1, Math.floor((index + 1) * ratio)));
-    let sum = 0;
-    for (let sourceIndex = start; sourceIndex < end; sourceIndex += 1) {
-      sum += samples[sourceIndex] ?? 0;
-    }
-    output[index] = sum / (end - start);
-  }
-
-  return output;
-}
-
-export function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
-  }
-  return btoa(binary);
-}
-
 function concatenate(
   left: Float32Array<ArrayBufferLike>,
   right: Float32Array<ArrayBufferLike>

@@ -96,4 +96,33 @@ describe('VoivoxService', () => {
       status: 'capturing'
     });
   });
+
+  it('imports a completed browser-local transcript without taking over an active capture', () => {
+    const service = new VoivoxService(() => new Date('2026-07-16T10:00:00.000Z'));
+    const active = service.startCapture({ kind: 'macos-process', label: 'Music' });
+
+    const imported = service.importCompletedCapture(
+      { kind: 'chrome-tab', label: 'My MV' },
+      [{ startMs: 0, endMs: 12_500, text: '这是浏览器本地转写。' }]
+    );
+
+    expect(imported).toMatchObject({
+      id: 'session_2',
+      source: { kind: 'chrome-tab', label: 'My MV' },
+      status: 'complete',
+      stoppedAt: '2026-07-16T10:00:00.000Z',
+      rawSegments: [{ startMs: 0, endMs: 12_500, text: '这是浏览器本地转写。' }]
+    });
+    expect(service.getActiveSession()?.id).toBe(active.id);
+    expect(service.listSessions().map((session) => session.id)).toEqual(['session_2', 'session_1']);
+  });
+
+  it('rejects an empty browser-local transcript import', () => {
+    const service = new VoivoxService();
+
+    expect(() => service.importCompletedCapture(
+      { kind: 'chrome-tab', label: 'Silent tab' },
+      [{ startMs: 0, endMs: 500, text: '   ' }]
+    )).toThrow('completed capture requires transcript text');
+  });
 });

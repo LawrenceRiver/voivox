@@ -1,166 +1,200 @@
 # VOIVOX
 
 <p align="center">
-  <img src="docs/assets/voivox-cover.png" width="260" alt="VOIVOX 的定格动画风格录音角色" />
+  <img src="docs/assets/voivox-cover.png" width="240" alt="VOIVOX stop-motion audio-to-text mascot" />
 </p>
 
 <p align="center">
-  <a href="https://github.com/LawrenceRiver/voivox/actions/workflows/verify.yml"><img src="https://github.com/LawrenceRiver/voivox/actions/workflows/verify.yml/badge.svg" alt="macOS verification" /></a>
+  <strong>Let playing audio become useful text—quietly, locally, and without taking over dictation.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/LawrenceRiver/voivox/actions/workflows/verify.yml"><img src="https://github.com/LawrenceRiver/voivox/actions/workflows/verify.yml/badge.svg" alt="Verification" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-0B6B6B.svg" alt="MIT License" /></a>
-  <img src="https://img.shields.io/badge/platform-macOS%20arm64-162126.svg" alt="macOS arm64" />
+  <img src="https://img.shields.io/badge/ASR-no%20API-0B6B6B.svg" alt="No speech API" />
   <img src="https://img.shields.io/badge/privacy-local--first-0B6B6B.svg" alt="Local first" />
 </p>
 
-<p align="center">
-  <a href="#first-run"><strong>开始使用</strong></a> · <a href="#codex-mcp"><strong>连接 Codex</strong></a> · <a href="#chrome-tab-capture"><strong>加载 Chrome 扩展</strong></a> · <a href="docs/release/RELEASE.md"><strong>发布手册</strong></a>
-</p>
-
-> **让声音安静地变成可处理的文本。** VOIVOX 是一个 local-first 的 macOS 音频转写工作台：选定一个 App 或当前 Chrome 标签页，静音收录、在本机转写，再交给 Codex 或任何你选择的 LLM 处理。
+VOIVOX captures only the source you choose, keeps the host muted, and transcribes with an open model on the device. The Chrome extension works by itself. The macOS App connects automatically when present, preserves a local transcript library, and packages a Codex MCP so an agent can read or transform the text without touching the immutable source.
 
 <p align="center">
-  <img src="docs/assets/voivox-overview.png" width="100%" alt="VOIVOX：Chrome Extension、VOIVOX App 与 Codex MCP 共享本地转写核心" />
+  <img src="docs/assets/voivox-overview.png" width="100%" alt="Chrome Extension, VOIVOX App, and Codex MCP connected by one local-first workflow" />
 </p>
 
-## Actual source-selection example
+## Three surfaces, one job
+
+| Surface | What it does | Needs the App? |
+| --- | --- | --- |
+| Chrome Extension | One-click muted capture of the active tab; local Fast/Quality Whisper transcription; copy/retry; Chinese/English UI | No |
+| macOS App | Automatic extension bridge, durable local sessions, experimental selected-App capture, local capability status | — |
+| Codex MCP | Lists sessions, reads/exports raw text, starts/stops an explicitly selected macOS source, and stores derived text separately | Yes |
+
+No cloud speech API or API key is required. VOIVOX does not hook the keyboard, clipboard, microphone dictation channel, Doubao, WeChat, or the system input method.
+
+## Real no-API smoke test: *Abuse* MV
 
 <p align="center">
-  <img src="docs/assets/voivox-audio-source-example.jpg" width="720" alt="VOIVOX 的 macOS 音源选择器，显示可供静音收录的 Core Audio 进程" />
+  <a href="https://www.xiaohongshu.com/explore/699ee564000000001b01624a"><img src="docs/assets/voivox-case-abuse-mv.jpg" width="100%" alt="Frame from Lawrence River's Abuse music video used for VOIVOX local transcription verification" /></a>
 </p>
 
-The picker is populated from Core Audio's active process list rather than every running application, so the chosen source corresponds to an audio-capable process. This public screenshot contains only the VOIVOX interface; it intentionally excludes any captured page, video frame, account, or transcript.
+The user's public Xiaohongshu MV has no native caption track, so VOIVOX extracted the first 30 seconds as 16 kHz mono audio and ran both pinned q8 models locally. Fast and Quality returned the same unedited text:
 
-## What ships
+> According to authoritative experts, Lawrence River is in the spotlight because he is a virus.
 
-VOIVOX contains three deliberately separate surfaces:
+The visible opening card supports the final clause, but this is a smoke test—not a word-error-rate claim. The recorded run used **no speech API**: Fast was warm-cached; Quality downloaded its model once, then inference ran on the local CPU. Exact revisions, hashes, cache conditions, raw outputs, and timings are preserved in the [comparison record](docs/evidence/voivox-xhs-abuse-local-asr-comparison.md) and its linked JSON evidence.
 
-- **Desktop App** — the primary product. It owns local sessions, selected-app capture, local transcription, and the authenticated local bridge.
-- **Codex MCP** — a small `stdio` wrapper that lets Codex read, export, start/stop, and save derived text for the desktop App's local sessions.
-- **Chrome extension** — a companion that, after a direct click, captures only the active Chrome tab and sends its audio to the App without routing it to speakers.
+<p align="center">
+  <img src="docs/assets/voivox-app-abuse-session.jpg" width="100%" alt="Packaged VOIVOX macOS App showing the imported Abuse MV transcript and ready Codex MCP" />
+</p>
 
-It deliberately does not touch the active input method, keyboard stream, clipboard, or another application's audio. Raw timestamped text is immutable; any text produced later by Codex or another LLM is a separate derived result.
+The rebuilt packaged App then accepted that transcript through its restricted Chrome bridge. Its bundled MCP launcher—using the App's embedded Node runtime—listed the local session and read back the same immutable text. The [packaged App + MCP smoke record](docs/evidence/voivox-packaged-app-mcp-smoke.md) preserves the artifact hashes, assertions, and privacy-safe result.
 
-## Quick start
+## Judge / first-use path
+
+Download the latest judge artifacts from [GitHub Releases](https://github.com/LawrenceRiver/voivox/releases), then:
+
+1. Unzip `VOIVOX-Chrome-Extension-0.1.0.zip`.
+2. Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the unzipped folder.
+3. Pin VOIVOX, open a playing tab, choose **Fast** or **Quality**, and click the large capture button.
+4. Stop capture to get text. The first run downloads and caches the selected pinned model; transcription itself stays local.
+5. Optionally drag `VOIVOX.app` into `/Applications` and open it. The extension discovers it automatically—there is no address or token pairing screen.
+
+The current App candidate is ad-hoc signed for bundle integrity, but it is not Developer ID signed or notarized. macOS may require right-clicking it and choosing **Open** once. See the [release runbook](docs/release/RELEASE.md) for exact artifact and Gatekeeper notes.
+
+### Local model modes
+
+| Mode | Pinned model | Approx. first download | Best for |
+| --- | --- | ---: | --- |
+| Fast | `onnx-community/whisper-tiny` q8 | 45 MB | quick drafts and shorter clips |
+| Quality | `onnx-community/whisper-base` q8 | 80 MB | better multilingual recognition |
+
+Each model is pinned to an exact repository revision in source. VOIVOX tries WebGPU first and falls back to bundled ONNX Runtime WASM. A capture is limited to ten minutes; model memory is released after inactivity. During model download or transcription, the same main button cancels the work. Cancelled, failed, or timed-out audio remains only in extension memory for Retry and is cleared after success, a new capture, extension reload/update, or Chrome exit.
+
+## Codex MCP
+
+The macOS App contains a bundled MCP server and launches it with Electron's embedded Node runtime, so the release build does not require a separate Node installation.
+
+After installing the App in `/Applications`, run:
+
+```bash
+codex mcp add voivox -- /Applications/VOIVOX.app/Contents/Resources/voivox/voivox-mcp
+```
+
+Open VOIVOX before using the tools. Useful first calls are:
+
+- `voivox_status`
+- `voivox_list_sessions`
+- `voivox_get_transcript`
+- `voivox_export_transcript`
+- `voivox_save_derived_text`
+
+Browser-local captures sync **completed text only** to the running App. Audio remains inside the extension. Codex can generate a summary, outline, translation, or cleanup as a derived result; it never overwrites timestamped raw text.
+
+For development instead of an installed App:
+
+```bash
+npm run build --workspace=@voivox/mcp
+codex mcp add voivox-dev -- node /absolute/path/to/voivox/apps/mcp/dist/index.js
+```
+
+## Development
+
+Requirements:
+
+- Node.js 22+
+- Swift 6+ and macOS 15+ for the native App hosts
+- Chrome 116+ for tab capture/offscreen APIs
+- Apple Silicon for the current packaged desktop target
 
 ```bash
 git clone https://github.com/LawrenceRiver/voivox.git
 cd voivox
 npm install
-bash scripts/install-asr-runtime.sh
+npm test
+npm run typecheck
+npm run build
+```
+
+Start the App from source:
+
+```bash
 npm run start --workspace=@voivox/desktop
 ```
 
-Then choose a source in the desktop App. For Chrome, load the companion extension and pair it with the restricted local bridge shown by VOIVOX.
+Build the standalone extension:
 
-## Project layout
+```bash
+npm run build --workspace=@voivox/chrome-extension
+```
+
+Load `apps/chrome-extension/dist` in Chrome. The stable extension key produces ID `pepfpbobjbjehhhcjiokmneclohlffno`, which is also the only extension origin accepted by the native host and restricted loopback routes.
+
+### Optional desktop ASR
+
+Chrome does not need the desktop Python runtime. The optional selected-macOS-App path currently uses `mlx-qwen3-asr` and is clearly labeled **Experimental** in the UI:
+
+```bash
+bash scripts/install-asr-runtime.sh
+```
+
+This runtime is stored outside the repository and is not embedded in release artifacts. Until real capture, permissions, and non-empty text are confirmed on the target Mac, selected-App capture should not be presented as production-stable.
+
+## Architecture and trust boundaries
 
 ```text
-apps/desktop           Electron desktop App
-apps/mcp               Codex MCP wrapper (stdio)
-apps/chrome-extension  Chrome MV3 companion
-packages/core          shared local session store and loopback API
-native/macos           Swift Core Audio selected-process host
-native/asr             local Qwen ASR worker
+User click
+  └─ Chrome tabCapture → zero-gain Web Audio graph → 16 kHz mono buffer
+       └─ bundled Transformers.js + WebGPU/WASM → browser-local text
+            └─ optional open App: completed text only (never audio)
+                 └─ exact-ID discovery + HMAC proof → local sessions.json → Codex MCP
+
+Separate desktop feature
+  └─ explicitly selected macOS App → experimental local Qwen ASR → local session
 ```
 
-## Requirements
+Security properties are tested rather than implied:
 
-- macOS on Apple Silicon for the bundled selected-process capture host and the MLX ASR runtime.
-- Node 22+ and Swift 6.0+ for development.
-- Python **3.10+** for local ASR. The machine's default Python may be older; install a newer Python first.
+- Native Messaging is restricted to the stable extension ID.
+- A fresh random challenge and HMAC bind discovery to the live server's exact `127.0.0.1` address; a stale crash file or relayed port cannot release the token.
+- The extension token can import only a completed browser transcript; it cannot accept audio, list/read sessions, use MCP routes, or access the App's primary token.
+- MV3 JavaScript, Worker code, AudioWorklet code, and WASM are packaged locally. Only pinned model **data** is downloaded.
+- Capture start requires a user gesture, and the extension recovers from stale MV3/offscreen state.
+- Raw and derived text are stored separately.
 
-The ASR default is `Qwen/Qwen3-ASR-0.6B` through `mlx-qwen3-asr`. It is a local, open-weight model and is not committed to this repository; download happens only after the user chooses to install the local runtime. The App is deliberately independent from system dictation, Doubao, WeChat, and any other input method, so normal voice typing keeps working elsewhere.
+Read [PRIVACY.md](PRIVACY.md), [SECURITY.md](SECURITY.md), and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the full boundary and dependency details.
 
-## First run
+## Repository layout
 
-Install JavaScript dependencies, then install the local ASR runtime into VOIVOX's application-data directory:
-
-```bash
-npm install
-bash scripts/install-asr-runtime.sh
-npm run start --workspace=@voivox/desktop
+```text
+apps/desktop           Electron desktop App and packaged MCP launcher
+apps/chrome-extension  Chrome MV3 popup, offscreen capture, local ASR Worker
+apps/mcp               stdio MCP server and local VOIVOX client
+packages/core          session model, persistence, authenticated loopback API
+packages/i18n          typed Chinese/English message catalog
+native/macos           selected-process host and Native Messaging verifier
+native/asr             optional desktop Python ASR worker
+docs                   design, hackathon, release, and visual assets
 ```
 
-If Python is somewhere else, provide it explicitly:
-
-```bash
-VOIVOX_BOOTSTRAP_PYTHON=/absolute/path/to/python3.10 bash scripts/install-asr-runtime.sh
-```
-
-The desktop App first writes its local connection information beneath `~/Library/Application Support/VOIVOX/`. It binds its API only to `127.0.0.1`; no service is exposed to the network.
-
-### Chrome tab capture
-
-1. Start the desktop App.
-2. Build the companion with `npm run build --workspace=@voivox/chrome-extension`.
-3. In Chrome, open `chrome://extensions`, enable Developer mode, and use **Load unpacked** on `apps/chrome-extension/dist`.
-4. In VOIVOX, choose **显示 Chrome 连接**, copy the local address and Chrome bridge token into the extension's **连接本机 App** panel.
-5. In the chosen tab, open the extension and click **开始静音收录**.
-
-The extension has its own restricted token. It can create, submit audio to, and stop only its own Chrome-tab captures; it cannot read sessions, call MCP, or access provider credentials.
-
-### Selected macOS app capture
-
-In the desktop App, select **选择 macOS 应用**, choose a running app, then start capture. VOIVOX uses a Core Audio process tap in muted mode, so it does not redirect the app to speakers. macOS will request the appropriate audio-recording permission the first time this is used. The temporary WAV created by the native host is deleted after local transcription.
-
-Chrome-tab audio is sent to the local ASR pipeline in short rolling windows, so text can appear while capture is active. The selected-macOS-app path currently transcribes its temporary recording after you stop it, then stores one duration-bounded raw segment; live process segmentation is a future refinement.
-
-For Chrome live capture, choose **快速 · 4 秒** when latency matters or **标准 · 8 秒** when you want more context in each local-ASR request. This changes the local segment window—not the model, privacy boundary, or source selection. The choice is shown in the desktop App and applies to the following Chrome extension capture.
-
-## Codex MCP
-
-Open the desktop App first, then add the built MCP executable to Codex's MCP configuration:
-
-```json
-{
-  "mcp_servers": {
-    "voivox": {
-      "command": "node",
-      "args": ["/absolute/path/to/voivox/apps/mcp/dist/index.js"]
-    }
-  }
-}
-```
-
-Build it once before connecting:
-
-```bash
-npm run build --workspace=@voivox/mcp
-```
-
-The MCP server reads the App's per-launch local connection file itself; do not add its bearer token to the MCP configuration. Available tools cover status, sessions, raw transcript export, listing selectable macOS processes, explicit process-capture start/stop, and saving a derived text result after Codex has processed the raw transcript. Chrome tabs remain extension-only because Chrome requires a direct user gesture before it exposes tab audio.
-
-## Verification commands
+## Verification and packaging
 
 ```bash
 npm test
 npm run typecheck
 npm run build
 (cd native/macos && swift test)
-```
-
-The automated suite tests the session model, access-control boundaries, MCP client/tools, audio codec, UI states, local ASR buffering, and the macOS host's mode selection. A true audio capture still needs the macOS permission prompt on the target machine; it is intentionally not invoked by automated tests.
-
-## Privacy model
-
-- Source audio is streamed in memory. The Python worker writes a temporary WAV only for one inference call, then removes it.
-- Raw transcripts are stored locally in `sessions.json` and include timestamps.
-- Derived LLM text is text-only and never overwrites the raw transcript.
-- The desktop's main API token and the Chrome bridge token are different and saved with user-only file permissions.
-- No cloud ASR or cloud LLM is required. If you later add an LLM provider, send only the finished text you choose to share.
-
-## Packaging and release status
-
-VOIVOX can produce a macOS arm64 DMG and ZIP locally:
-
-```bash
-npm run package:dir --workspace=@voivox/desktop
+npm run package:zip --workspace=@voivox/chrome-extension
 npm run package:mac --workspace=@voivox/desktop
 ```
 
-Artifacts are written to `apps/desktop/release/`. The package includes the App icon, Electron shell, Core Audio process host, and ASR worker; it does not package a pre-downloaded model. It is a **release candidate**, not yet a signed or notarized public release. Follow [the macOS release runbook](docs/release/RELEASE.md) before sharing it broadly.
+The suite covers core access control, persistence, Native Messaging framing/proof, extension identity, audio buffering, lifecycle recovery, model switching, worker errors, bilingual UI state, MCP tools, and distributable build contents. The recorded *Abuse* MV check verifies the real media-to-pinned-local-model path without a speech API, and the rebuilt App artifact plus its bundled MCP passed a real local session round trip. Loading the packaged extension into Chrome and capturing a live tab remains the final manual browser acceptance check.
 
-The repository includes GitHub Actions verification and package-candidate workflows. The public source is [LawrenceRiver/voivox](https://github.com/LawrenceRiver/voivox); Apple signing identity, notarization credentials, and a clean-device recording-permission QA remain deliberately unfilled rather than guessed.
+## OpenAI Build Week
 
-## Contributing and security
+VOIVOX was meaningfully extended during the July 13–21, 2026 submission period as a non-trivial Codex collaboration: product architecture, TDD implementation, Swift/TypeScript security hardening, local-model integration, bilingual UX, independent review, release-gate testing, and reproducible local-model verification were carried out in the primary Codex build task and recorded in dated commits.
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) for the local-first contribution rules and [SECURITY.md](SECURITY.md) for private vulnerability reporting. The project is released under the [MIT License](LICENSE).
+The submission checklist and under-three-minute demo storyboard are in [docs/hackathon/OPENAI_BUILD_WEEK.md](docs/hackathon/OPENAI_BUILD_WEEK.md). The Devpost entry must still include the public YouTube demo and the `/feedback` Session ID from the primary Codex task.
+
+## License
+
+VOIVOX source is released under the [MIT License](LICENSE). Third-party components and separately downloaded model data retain their own terms.

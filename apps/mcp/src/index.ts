@@ -123,16 +123,49 @@ export async function loadVoivoxConnection(connectionFile = defaultConnectionFil
     throw new Error('VOIVOX desktop app is not ready. Open it once, then try Codex again.');
   }
 
-  if (!parsed || typeof parsed !== 'object') {
-    throw new Error('VOIVOX desktop connection file is invalid. Reopen the app to repair it.');
+  return parseVoivoxConnection(parsed);
+}
+
+export function parseVoivoxConnection(value: unknown): VoivoxConnection {
+  const invalid = () => new Error(
+    'VOIVOX desktop connection file is invalid. Reopen the app to repair it.'
+  );
+  if (!value || typeof value !== 'object') {
+    throw invalid();
   }
 
-  const connection = parsed as { baseUrl?: unknown; token?: unknown };
-  if (typeof connection.baseUrl !== 'string' || typeof connection.token !== 'string') {
-    throw new Error('VOIVOX desktop connection file is invalid. Reopen the app to repair it.');
+  const connection = value as { baseUrl?: unknown; token?: unknown };
+  if (
+    typeof connection.baseUrl !== 'string'
+    || typeof connection.token !== 'string'
+    || connection.token.length === 0
+    || connection.token.length > 16_384
+    || /[\s\u0000-\u001f\u007f]/u.test(connection.token)
+  ) {
+    throw invalid();
   }
 
-  return { baseUrl: connection.baseUrl, token: connection.token };
+  try {
+    const baseUrl = new URL(connection.baseUrl);
+    const port = Number(baseUrl.port);
+    if (
+      baseUrl.protocol !== 'http:'
+      || baseUrl.hostname !== '127.0.0.1'
+      || !Number.isInteger(port)
+      || port < 1
+      || port > 65_535
+      || baseUrl.username !== ''
+      || baseUrl.password !== ''
+      || baseUrl.pathname !== '/'
+      || baseUrl.search !== ''
+      || baseUrl.hash !== ''
+    ) {
+      throw invalid();
+    }
+    return { baseUrl: `http://127.0.0.1:${port}`, token: connection.token };
+  } catch {
+    throw invalid();
+  }
 }
 
 export function defaultConnectionFile(): string {

@@ -5,21 +5,46 @@ import type { LocalAsrEngine } from './asr-pipeline.js';
 type PendingRequest = {
   reject: (error: Error) => void;
   resolve: (value: { text: string }) => void;
+  timeout: ReturnType<typeof setTimeout>;
 };
+
+type WorkerTermination = {
+  graceTimer: ReturnType<typeof setTimeout>;
+  hardTimer: ReturnType<typeof setTimeout>;
+  promise: Promise<void>;
+  resolve: () => void;
+};
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 30 * 60_000;
+const DEFAULT_TERMINATION_GRACE_MS = 2_000;
 
 export class PythonQwenAsrEngine implements LocalAsrEngine {
   private child: ChildProcessWithoutNullStreams | undefined;
   private readonly pending = new Map<string, PendingRequest>();
   private nextRequestId = 1;
+  private readonly requestTimeoutMs: number;
   private stderr = '';
+  private readonly terminationGraceMs: number;
+  private readonly terminations = new Map<ChildProcessWithoutNullStreams, WorkerTermination>();
 
   constructor(
     private readonly options: {
       modelId?: string;
       pythonCommand: string;
+      requestTimeoutMs?: number;
+      terminationGraceMs?: number;
       workerPath: string;
     }
-  ) {}
+  ) {
+    this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    this.terminationGraceMs = options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS;
+    if (
+      !isPositiveTimeout(this.requestTimeoutMs)
+      || !isPositiveTimeout(this.terminationGraceMs)
+    ) {
+      throw new Error('VOIVOX local ASR timeouts must be positive numbers.');
+    }
+  }
 
   async transcribe(audio: {
     pcm: Uint8Array;
@@ -42,18 +67,41 @@ export class PythonQwenAsrEngine implements LocalAsrEngine {
     const id = `asr_${this.nextRequestId++}`;
 
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      child.stdin.write(`${JSON.stringify({ id, ...payload })}\n`);
+      const timeout = setTimeout(() => {
+        if (!this.pending.has(id)) {
+          return;
+        }
+        const error = new Error(`VOIVOX local ASR timed out after ${this.requestTimeoutMs} ms.`);
+        if (this.child === child) {
+          this.child = undefined;
+        }
+        this.rejectAll(error);
+        this.terminateWorker(child);
+      }, this.requestTimeoutMs);
+      timeout.unref();
+      this.pending.set(id, { resolve, reject, timeout });
+      try {
+        child.stdin.write(`${JSON.stringify({ id, ...payload })}\n`);
+      } catch (error) {
+        clearTimeout(timeout);
+        this.pending.delete(id);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 
-  close(): void {
-    this.child?.kill();
+  close(): Promise<void> {
+    const child = this.child;
     this.child = undefined;
+    this.rejectAll(new Error('VOIVOX local ASR stopped.'));
+    if (child) {
+      this.terminateWorker(child);
+    }
+    return Promise.all([...this.terminations.values()].map(({ promise }) => promise)).then(() => undefined);
   }
 
   private ensureWorker(): ChildProcessWithoutNullStreams {
-    if (this.child && !this.child.killed) {
+    if (this.child && this.child.exitCode === null && !this.child.killed) {
       return this.child;
     }
 
@@ -74,13 +122,80 @@ export class PythonQwenAsrEngine implements LocalAsrEngine {
     child.stderr.on('data', (chunk: string) => {
       this.stderr = `${this.stderr}${chunk}`.slice(-4_000);
     });
-    child.on('error', (error) => this.rejectAll(error));
+    child.stdin.on('error', (error) => {
+      if (this.child !== child) {
+        return;
+      }
+      this.child = undefined;
+      this.rejectAll(error);
+      this.terminateWorker(child);
+    });
+    child.on('error', (error) => {
+      this.finishTermination(child);
+      if (this.child !== child) {
+        return;
+      }
+      this.child = undefined;
+      this.rejectAll(error);
+    });
     child.on('exit', () => {
+      this.finishTermination(child);
+      if (this.child !== child) {
+        return;
+      }
       this.child = undefined;
       this.rejectAll(new Error(this.stderr || 'The local Qwen ASR worker stopped unexpectedly.'));
     });
     this.child = child;
     return child;
+  }
+
+  private terminateWorker(child: ChildProcessWithoutNullStreams): Promise<void> {
+    const existing = this.terminations.get(child);
+    if (existing) {
+      if (hasExited(child)) {
+        this.finishTermination(child);
+      }
+      return existing.promise;
+    }
+    if (hasExited(child)) {
+      return Promise.resolve();
+    }
+
+    let resolveTermination!: () => void;
+    const promise = new Promise<void>((resolve) => {
+      resolveTermination = resolve;
+    });
+    const graceTimer = setTimeout(() => {
+      if (!hasExited(child)) {
+        child.kill('SIGKILL');
+      }
+    }, this.terminationGraceMs);
+    const hardTimer = setTimeout(
+      () => this.finishTermination(child),
+      this.terminationGraceMs * 2
+    );
+    graceTimer.unref();
+    hardTimer.unref();
+    this.terminations.set(child, {
+      graceTimer,
+      hardTimer,
+      promise,
+      resolve: resolveTermination
+    });
+    child.kill('SIGTERM');
+    return promise;
+  }
+
+  private finishTermination(child: ChildProcessWithoutNullStreams): void {
+    const termination = this.terminations.get(child);
+    if (!termination) {
+      return;
+    }
+    clearTimeout(termination.graceTimer);
+    clearTimeout(termination.hardTimer);
+    this.terminations.delete(child);
+    termination.resolve();
   }
 
   private handleResponse(line: string): void {
@@ -103,6 +218,7 @@ export class PythonQwenAsrEngine implements LocalAsrEngine {
       return;
     }
     this.pending.delete(response.id);
+    clearTimeout(pending.timeout);
     if (typeof response.error === 'string') {
       pending.reject(new Error(response.error));
       return;
@@ -115,7 +231,18 @@ export class PythonQwenAsrEngine implements LocalAsrEngine {
   }
 
   private rejectAll(error: Error): void {
-    this.pending.forEach(({ reject }) => reject(error));
+    this.pending.forEach(({ reject, timeout }) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
     this.pending.clear();
   }
+}
+
+function hasExited(child: ChildProcessWithoutNullStreams): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+function isPositiveTimeout(value: number): boolean {
+  return Number.isFinite(value) && value > 0;
 }
