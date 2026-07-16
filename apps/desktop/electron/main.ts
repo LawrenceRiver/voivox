@@ -11,7 +11,7 @@ import { MacProcessTapHost } from '../src/main/mac-process-tap-host.js';
 import { PythonQwenAsrEngine } from '../src/main/python-qwen-asr-engine.js';
 import { resolvePythonCommand } from '../src/main/python-runtime.js';
 import { readWavDuration } from '../src/main/wav-duration.js';
-import { resolveBundledResource } from './resource-paths.js';
+import { resolveBundledResource, resolveElectronEntryPoints } from './resource-paths.js';
 
 app.setName('VOIVOX');
 let window: BrowserWindow | undefined;
@@ -161,6 +161,7 @@ function registerIpc(
 }
 
 function createWindow(): void {
+  const entryPoints = resolveElectronEntryPoints(import.meta.url);
   window = new BrowserWindow({
     backgroundColor: '#f3f4f0',
     height: 760,
@@ -172,13 +173,13 @@ function createWindow(): void {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      preload: new URL('./preload.js', import.meta.url).pathname,
+      preload: entryPoints.preload,
       sandbox: true
     }
   });
 
   window.once('ready-to-show', () => window?.show());
-  void window.loadFile(new URL('../renderer/index.html', import.meta.url).pathname);
+  void window.loadFile(entryPoints.renderer);
 }
 
 async function writeMcpConnectionFile(directory: string, baseUrl: string, token: string): Promise<void> {

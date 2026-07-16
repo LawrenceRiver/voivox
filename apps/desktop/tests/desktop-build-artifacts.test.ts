@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
@@ -10,7 +11,7 @@ const desktopDirectory = new URL('..', import.meta.url);
 describe('desktop distribution build', () => {
   it('loads the renderer and sandboxed preload from packaged file URLs', async () => {
     await run('npm', ['run', 'build', '--workspace=@voivox/desktop'], {
-      cwd: new URL('../../..', import.meta.url).pathname
+      cwd: fileURLToPath(new URL('../../..', import.meta.url))
     });
 
     const [rendererHtml, preload] = await Promise.all([
