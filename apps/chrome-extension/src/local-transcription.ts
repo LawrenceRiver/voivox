@@ -9,12 +9,23 @@ export type BrowserModelSpec = {
 
 export type LocalAsrAvailability = 'checking' | 'ready' | 'missing';
 
-export type DesktopDiscovery = {
-  reachable: boolean;
-  localAsr?: LocalAsrAvailability;
-};
+export type DesktopDiscovery =
+  | { reachable: false; source: 'none' }
+  | {
+      extensionDiscovery: boolean;
+      localAsr: LocalAsrAvailability;
+      reachable: true;
+      source: 'loopback-probe';
+    }
+  | {
+      baseUrl: string;
+      localAsr: LocalAsrAvailability;
+      reachable: true;
+      source: 'native-messaging';
+      token: string;
+    };
 
-export type TranscriptionRoute = 'desktop-local' | 'browser-local' | 'unavailable';
+export type TranscriptionRoute = 'browser-local' | 'unavailable';
 
 const browserModels = {
   fast: {
@@ -36,11 +47,8 @@ export function browserModelForMode(mode: TranscriptionMode): BrowserModelSpec {
 }
 
 export function chooseTranscriptionRoute(
-  desktop: DesktopDiscovery,
+  _desktop: DesktopDiscovery,
   browserLocalSupported: boolean
 ): TranscriptionRoute {
-  if (desktop.reachable && desktop.localAsr === 'ready') {
-    return 'desktop-local';
-  }
   return browserLocalSupported ? 'browser-local' : 'unavailable';
 }

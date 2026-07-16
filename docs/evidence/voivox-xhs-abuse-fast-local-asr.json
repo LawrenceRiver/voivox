@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-07-16T12:51:28.174Z",
+  "source": {
+    "title": "大学生勇闯音乐圈：Abuse 正式 M/V 上线",
+    "url": "https://www.xiaohongshu.com/explore/699ee564000000001b01624a",
+    "inputSha256": "2249cab0ec403f7afe63ce1078da3eb26873bad048c56113e51ed9f9c450fd10",
+    "inputSizeBytes": 96143846
+  },
+  "segment": {
+    "startSeconds": 0,
+    "durationSeconds": 30
+  },
+  "audio": {
+    "channels": 1,
+    "codec": "pcm_s16le",
+    "container": "wav",
+    "sampleRateHz": 16000,
+    "sha256": "b92facb256c6bdac8337f3bd585a5322f1488dd1d18f52a836c39f4a6bcf0ea9",
+    "sizeBytes": 960078
+  },
+  "model": {
+    "dtype": "q8",
+    "id": "onnx-community/whisper-tiny",
+    "revision": "ff4177021cc41f7db950912b73ea4fdf7d01d8e7",
+    "library": "@huggingface/transformers",
+    "libraryVersion": "3.8.1",
+    "mode": "fast"
+  },
+  "execution": {
+    "inferenceLocation": "local-machine",
+    "modelCacheStateBeforeRun": "warm",
+    "modelLoadSeconds": 0.232,
+    "runtime": "Transformers.js + ONNX Runtime CPU verification harness",
+    "speechApiUsed": false,
+    "totalVerificationSeconds": 0.761,
+    "transcriptionSeconds": 0.26
+  },
+  "result": {
+    "text": "According to authoritative experts, Lawrence River is in the spotlight because he is a virus."
+  },
+  "limitations": [
+    "This is one real-path smoke test, not a word-error-rate benchmark.",
+    "The selected source is a music mix; vocals and instrumental backing can reduce speech-recognition accuracy.",
+    "The Node verification harness uses the same pinned q8 model as VOIVOX fast mode, but it does not replace an in-browser extension UI test."
+  ]
+}

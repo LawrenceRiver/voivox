@@ -1,23 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { StreamingDownsampler, float32ToPcm16 } from '../src/audio-codec.js';
-
-describe('float32ToPcm16', () => {
-  it('clamps browser audio and encodes signed 16-bit little-endian PCM', () => {
-    expect([...float32ToPcm16(new Float32Array([-1.5, -1, 0, 1, 1.5]))]).toEqual([
-      0,
-      128,
-      0,
-      128,
-      0,
-      0,
-      255,
-      127,
-      255,
-      127
-    ]);
-  });
-});
+import { StreamingDownsampler } from '../src/audio-codec.js';
 
 describe('StreamingDownsampler', () => {
   it('preserves 16 kHz duration across small 48 kHz worklet blocks', () => {

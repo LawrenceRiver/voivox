@@ -55,13 +55,48 @@ export class CapturedAudio {
       return true;
     }
 
-    let energy = 0;
+    const windowSamples = Math.max(1, Math.round(this.sampleRate * 0.1));
+    const hopSamples = Math.max(1, Math.floor(windowSamples / 2));
+    const peakThreshold = Math.max(0.01, rmsThreshold * 8);
+    const squaredWindow = new Float64Array(windowSamples);
+    let windowEnergy = 0;
+    let windowCount = 0;
+    let ringIndex = 0;
+    let samplesSinceCheck = 0;
     for (const chunk of this.chunks) {
       for (const sample of chunk) {
-        energy += sample * sample;
+        if (Math.abs(sample) >= peakThreshold) {
+          return false;
+        }
+        const squared = sample * sample;
+        if (windowCount < windowSamples) {
+          squaredWindow[windowCount] = squared;
+          windowEnergy += squared;
+          windowCount += 1;
+          if (windowCount === windowSamples) {
+            if (Math.sqrt(windowEnergy / windowSamples) >= rmsThreshold) {
+              return false;
+            }
+            samplesSinceCheck = 0;
+          }
+          continue;
+        }
+
+        windowEnergy += squared - squaredWindow[ringIndex]!;
+        squaredWindow[ringIndex] = squared;
+        ringIndex = (ringIndex + 1) % windowSamples;
+        samplesSinceCheck += 1;
+        if (samplesSinceCheck === hopSamples) {
+          if (Math.sqrt(Math.max(0, windowEnergy) / windowSamples) >= rmsThreshold) {
+            return false;
+          }
+          samplesSinceCheck = 0;
+        }
       }
     }
-    return Math.sqrt(energy / this.sampleCount) < rmsThreshold;
+    const denominator = windowCount < windowSamples ? windowCount : windowSamples;
+    return denominator === 0
+      || Math.sqrt(Math.max(0, windowEnergy) / denominator) < rmsThreshold;
   }
 
   clear(): void {

@@ -9,12 +9,26 @@ describe('capture presentation', () => {
         sourceKind: 'chrome-tab',
         sourceLabel: '当前 Chrome 标签页',
         activeSession: undefined
-      })
+      }, 'zh-CN')
     ).toEqual({
-      actionLabel: '在扩展中开始',
+      actionLabel: '在 Chrome 扩展中开始',
       canChangeSource: true,
-      notice: '在 Chrome 扩展中点击开始后，只有当前标签页的声音会被发送到本机转写引擎。',
+      notice: '扩展始终在浏览器本地转写；App 打开时只自动保存完成的文字。',
       statusLabel: '准备就绪'
+    });
+  });
+
+  it('returns the same capture state in English', () => {
+    expect(
+      deriveCapturePresentation({
+        sourceKind: 'chrome-tab',
+        sourceLabel: 'Current Chrome tab',
+        activeSession: undefined
+      }, 'en')
+    ).toMatchObject({
+      actionLabel: 'Start in the Chrome extension',
+      notice: 'The extension always transcribes in the browser. When the App is open, only completed text is saved automatically.',
+      statusLabel: 'Ready'
     });
   });
 
@@ -24,7 +38,7 @@ describe('capture presentation', () => {
         sourceKind: 'macos-process',
         sourceLabel: 'Safari',
         activeSession: { id: 'session_1', status: 'capturing' }
-      })
+      }, 'zh-CN')
     ).toMatchObject({
       actionLabel: '停止收录',
       canChangeSource: false,

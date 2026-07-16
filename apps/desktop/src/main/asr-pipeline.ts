@@ -1,4 +1,11 @@
-import { type ChromeAudioChunk, VoivoxService } from '@voivox/core';
+import { VoivoxService } from '@voivox/core';
+
+export type BufferedAudioChunk = {
+  channels: 1;
+  pcm: Uint8Array;
+  sampleRate: 16_000;
+  sessionId: string;
+};
 
 export type LocalAsrEngine = {
   transcribe(audio: {
@@ -37,7 +44,7 @@ export class BufferedAsrPipeline {
     this.minimumWindowBytes = Math.max(1, Math.floor((minimumWindowMs / 1_000) * 16_000 * 2));
   }
 
-  ingest(chunk: ChromeAudioChunk): void {
+  ingest(chunk: BufferedAudioChunk): void {
     const state = this.bufferedSessions.get(chunk.sessionId) ?? {
       audio: new Uint8Array(),
       nextStartMs: 0,

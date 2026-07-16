@@ -22,3 +22,8 @@ export type DesktopDashboard = {
   activeSession?: DesktopSession;
   sessions: DesktopSession[];
 };
+
+export type DesktopCapabilities = {
+  extensionDiscovery: boolean;
+  localAsr: 'checking' | 'ready' | 'missing';
+};

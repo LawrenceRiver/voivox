@@ -1,15 +1,17 @@
+import { translate, type Locale } from '@voivox/i18n';
+
 import type { DesktopSession } from './types.js';
 
-export function TranscriptPanel({ session }: { session?: DesktopSession }) {
+export function TranscriptPanel({ locale, session }: { locale: Locale; session?: DesktopSession }) {
   const segments = session?.rawSegments ?? [];
   const latestTime = segments.at(-1)?.endMs ?? 0;
 
   return (
     <section aria-labelledby="transcript-heading" className="transcript-panel">
-      <div className="panel-heading">
-        <div>
-          <p className="rail-kicker">LIVE TRANSCRIPT</p>
-          <h2 id="transcript-heading">原始转写</h2>
+      <div className="panel-heading panel-title-row">
+        <div className="section-heading compact-heading">
+          <span className="eyebrow">{translate(locale, 'desktop.transcript.eyebrow')}</span>
+          <h2 id="transcript-heading">{translate(locale, 'transcript.title')}</h2>
         </div>
         <time className="elapsed-time" dateTime={`PT${Math.floor(latestTime / 1000)}S`}>
           {formatElapsed(latestTime)}
@@ -29,8 +31,9 @@ export function TranscriptPanel({ session }: { session?: DesktopSession }) {
             </ol>
           ) : (
             <div className="transcript-empty">
-              <p>{session ? '等待本地转写引擎返回第一段文字。' : '选择来源后开始收录，转写会出现在这里。'}</p>
-              <span>原始文本会保留时间戳，AI 整理只会生成一个副本。</span>
+              <span aria-hidden="true" className="transcript-wave"><i /><i /><i /><i /><i /></span>
+              <p>{session ? translate(locale, 'desktop.transcript.waiting') : translate(locale, 'transcript.empty')}</p>
+              <span>{translate(locale, 'desktop.transcript.retention')}</span>
             </div>
           )}
         </div>

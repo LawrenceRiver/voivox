@@ -1,3 +1,5 @@
+import { translate, type Locale } from '@voivox/i18n';
+
 export type CapturePresentationInput = {
   sourceKind: 'chrome-tab' | 'macos-process' | 'microphone';
   sourceLabel: string;
@@ -15,32 +17,31 @@ export type CapturePresentation = {
 };
 
 export function deriveCapturePresentation(
-  input: CapturePresentationInput
+  input: CapturePresentationInput,
+  locale: Locale
 ): CapturePresentation {
   if (input.activeSession?.status === 'capturing') {
     return {
-      actionLabel: '停止收录',
+      actionLabel: translate(locale, 'capture.stop'),
       canChangeSource: false,
-      notice: `VOIVOX 正在监听 ${input.sourceLabel}，不会改变其他应用的输入法或声音设置。`,
-      statusLabel: '正在静音收录'
+      notice: translate(locale, 'desktop.capture.activeNotice', { source: input.sourceLabel }),
+      statusLabel: translate(locale, 'status.capturing')
     };
   }
 
   if (input.sourceKind === 'chrome-tab') {
     return {
-      actionLabel: '在扩展中开始',
+      actionLabel: translate(locale, 'desktop.capture.chromeAction'),
       canChangeSource: true,
-      notice: '在 Chrome 扩展中点击开始后，只有当前标签页的声音会被发送到本机转写引擎。',
-      statusLabel: '准备就绪'
+      notice: translate(locale, 'desktop.capture.chromeNotice'),
+      statusLabel: translate(locale, 'status.ready')
     };
   }
 
   return {
-    actionLabel: '开始静音收录',
+    actionLabel: translate(locale, 'desktop.capture.macAction'),
     canChangeSource: true,
-    notice: input.sourceKind === 'macos-process'
-      ? '选择后，只有所选 macOS 应用的声音会被发送到本机转写引擎。'
-      : '选择后，只有内建麦克风的声音会被发送到本机转写引擎。',
-    statusLabel: '准备就绪'
+    notice: translate(locale, 'desktop.capture.macNotice'),
+    statusLabel: translate(locale, 'status.ready')
   };
 }

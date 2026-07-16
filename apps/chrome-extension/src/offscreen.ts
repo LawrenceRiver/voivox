@@ -1,16 +1,37 @@
-import { StreamingDownsampler, bytesToBase64, float32ToPcm16 } from './audio-codec.js';
-import { getCaptureState, saveCaptureState, type BridgeConfig } from './bridge.js';
-import { BoundedAudioQueue } from './pending-audio.js';
+import { StreamingDownsampler } from './audio-codec.js';
+import { AsrWorkerClient, AsrWorkerOperationError } from './asr-worker-client.js';
+import {
+  getCaptureState,
+  saveCaptureState,
+  type BridgeConfig,
+  type CaptureState
+} from './bridge.js';
+import type { BrowserTranscriberState } from './browser-transcriber.js';
+import { CapturedAudio } from './captured-audio.js';
+import type { TranscriptionMode } from './local-transcription.js';
+import { syncBrowserTranscriptToDesktop } from './transcript-sync.js';
+
+type ActiveRoute = 'browser-local';
+const ASR_WORKER_IDLE_MS = 2 * 60 * 1_000;
 
 let audioContext: AudioContext | undefined;
 let audioStream: MediaStream | undefined;
 let workletNode: AudioWorkletNode | undefined;
 let silentGain: GainNode | undefined;
 let sessionId: string | undefined;
+let tabTitle: string | undefined;
+let route: ActiveRoute | undefined;
+let mode: TranscriptionMode = 'quality';
 let bridge: BridgeConfig | undefined;
-let flushWork: Promise<void> | undefined;
+let transcriptionWork: Promise<void> | undefined;
+let workerStateQueue: Promise<void> = Promise.resolve();
+let operationTail: Promise<void> = Promise.resolve();
+let asrClient: AsrWorkerClient | undefined;
+let asrIdleTimer: ReturnType<typeof setTimeout> | undefined;
+let captureLimitReached = false;
+let captureGeneration = 0;
 let downsampler = new StreamingDownsampler();
-const pendingAudio = new BoundedAudioQueue(16_000 * 60);
+const capturedBrowserAudio = new CapturedAudio({ maximumSeconds: 10 * 60, sampleRate: 16_000 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.target !== 'offscreen') {
@@ -18,27 +39,61 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'audio:start') {
-    void startCapture(message).then(sendResponse).catch((error: unknown) => {
-      sendResponse({ error: error instanceof Error ? error.message : '无法初始化标签页声音。' });
+    void serializeCaptureOperation(() => startCapture(message)).then(sendResponse).catch((error: unknown) => {
+      sendResponse({ error: asError(error).message });
     });
     return true;
   }
 
   if (message.type === 'audio:stop') {
-    void stopCapture().then(() => sendResponse({ ok: true })).catch((error: unknown) => {
-      sendResponse({ error: error instanceof Error ? error.message : '无法停止收录。' });
+    void serializeCaptureOperation(() => stopCaptureFromMessage()).then(sendResponse).catch((error: unknown) => {
+      sendResponse({ error: asError(error).message });
+    });
+    return true;
+  }
+
+  if (message.type === 'audio:retry') {
+    void serializeCaptureOperation(() => retryBrowserTranscription()).then((state) => sendResponse({ state })).catch((error: unknown) => {
+      sendResponse({ error: asError(error).message });
+    });
+    return true;
+  }
+
+  if (message.type === 'audio:cancel') {
+    void serializeCaptureOperation(() => cancelBrowserTranscription()).then((state) => sendResponse({ state })).catch((error: unknown) => {
+      sendResponse({ error: asError(error).message });
     });
     return true;
   }
 });
 
+async function stopCaptureFromMessage(): Promise<{ state: CaptureState }> {
+  return { state: await stopCapture() };
+}
+
 async function startCapture(message: {
-  bridge: BridgeConfig;
+  bridge?: BridgeConfig;
+  mode: TranscriptionMode;
+  route: unknown;
   streamId: string;
   tabTitle: string;
 }): Promise<{ sessionId: string }> {
-  await stopCapture();
+  if (message.route !== 'browser-local') {
+    throw new Error('Chrome 标签页只能在浏览器本地转写。');
+  }
+  if (transcriptionWork) {
+    throw new Error('请等待当前本地转写完成。');
+  }
+  await releaseAudioGraph();
+  resetCaptureBuffers();
+  sessionId = undefined;
+  route = message.route;
+  mode = message.mode;
   bridge = message.bridge;
+  tabTitle = message.tabTitle;
+  captureLimitReached = false;
+  const generation = ++captureGeneration;
+
   try {
     audioStream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -48,69 +103,260 @@ async function startCapture(message: {
         }
       } as MediaTrackConstraints
     });
+    for (const track of audioStream.getTracks()) {
+      track.addEventListener('ended', () => {
+        void serializeCaptureOperation(async () => {
+          if (generation !== captureGeneration) {
+            return getCaptureState();
+          }
+          return stopCapture();
+        }).catch((error: unknown) => enqueueCaptureError(asError(error)));
+      }, { once: true });
+    }
 
-    const response = await localRequest('/v1/extension/captures', {
-      method: 'POST',
-      body: JSON.stringify({ source: { kind: 'chrome-tab', label: message.tabTitle } })
-    });
-    const session = await response.json() as { id: string };
-    sessionId = session.id;
+    sessionId = `browser_${crypto.randomUUID()}`;
+
     audioContext = new AudioContext();
     await audioContext.audioWorklet.addModule(chrome.runtime.getURL('audio-worklet.js'));
     const source = audioContext.createMediaStreamSource(audioStream);
     workletNode = new AudioWorkletNode(audioContext, 'voivox-capture');
-    workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => queueAudio(event.data, audioContext?.sampleRate ?? 48_000);
+    workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
+      queueAudio(event.data, audioContext?.sampleRate ?? 48_000, generation);
+    };
     source.connect(workletNode);
     silentGain = audioContext.createGain();
     silentGain.gain.value = 0;
     workletNode.connect(silentGain);
     silentGain.connect(audioContext.destination);
     await audioContext.resume();
+    const started: CaptureState = {
+      active: true,
+      mode,
+      phase: 'capturing',
+      route: 'browser-local',
+      sessionId,
+      tabTitle: message.tabTitle
+    };
+    await saveCaptureState(started);
     return { sessionId };
   } catch (error) {
-    await stopCapture().catch(() => undefined);
+    await releaseAudioGraph().catch(() => undefined);
+    resetCaptureBuffers();
+    sessionId = undefined;
+    route = undefined;
+    bridge = undefined;
     throw error;
   }
 }
 
-async function stopCapture(): Promise<void> {
-  const currentSession = sessionId;
-  const currentBridge = bridge;
+async function stopCapture(): Promise<CaptureState> {
+  const currentRoute = route;
+  const currentSessionId = sessionId;
+  const currentTabTitle = tabTitle;
+  captureGeneration += 1;
   await releaseAudioGraph();
-  let failure: Error | undefined;
-  try {
-    await flushAudio();
-  } catch (error) {
-    failure = asError(error);
-  }
 
-  if (!failure && currentSession && currentBridge) {
-    try {
-      const response = await fetch(`${currentBridge.baseUrl}/v1/extension/captures/${encodeURIComponent(currentSession)}/stop`, {
-        method: 'POST',
-        headers: { authorization: `Bearer ${currentBridge.token}` }
-      });
-      if (!response.ok) {
-        throw new Error('桌面 VOIVOX 未能确认停止标签页收录。');
-      }
-    } catch (error) {
-      failure = asError(error);
+  if (!currentRoute || !currentSessionId) {
+    const current = await getCaptureState();
+    if (!current.active) {
+      return current;
     }
+    const recovered: CaptureState = {
+      active: false,
+      mode: current.mode,
+      phase: 'idle'
+    };
+    await saveCaptureState(recovered);
+    return recovered;
   }
 
-  if (failure) {
-    await reportCaptureError(failure);
-    throw failure;
+  const baseState: CaptureState = {
+    active: false,
+    mode,
+    phase: 'transcribing',
+    route: 'browser-local',
+    sessionId: currentSessionId,
+    tabTitle: currentTabTitle
+  };
+  if (capturedBrowserAudio.isSilent()) {
+    const silentState: CaptureState = {
+      ...baseState,
+      canRetry: false,
+      error: '没有检测到可转写的标签页声音。请确认视频正在播放。',
+      phase: 'error'
+    };
+    await saveCaptureState(silentState);
+    resetCaptureBuffers();
+    sessionId = undefined;
+    route = undefined;
+    bridge = undefined;
+    return silentState;
   }
 
-  sessionId = undefined;
-  bridge = undefined;
-  pendingAudio.clear();
-  downsampler.reset();
+  await saveCaptureState(baseState);
+  transcriptionWork = runBrowserTranscription().finally(() => {
+    transcriptionWork = undefined;
+  });
+  return baseState;
+}
+
+async function retryBrowserTranscription(): Promise<CaptureState> {
+  const current = await getCaptureState();
+  if (transcriptionWork) {
+    return current;
+  }
+  if (current.route !== 'browser-local' || !current.canRetry) {
+    throw new Error('没有保留可重试的浏览器本地音频。');
+  }
+  const retrying: CaptureState = {
+    ...current,
+    canRetry: false,
+    error: undefined,
+    errorCode: undefined,
+    phase: 'transcribing'
+  };
+  await saveCaptureState(retrying);
+  transcriptionWork = runBrowserTranscription().finally(() => {
+    transcriptionWork = undefined;
+  });
+  return retrying;
+}
+
+async function cancelBrowserTranscription(): Promise<CaptureState> {
+  const work = transcriptionWork;
+  if (!work) {
+    return getCaptureState();
+  }
+  asrClient?.cancel();
+  await work;
+  return getCaptureState();
+}
+
+async function runBrowserTranscription(): Promise<void> {
+  const client = getAsrClient();
+  try {
+    const durationSeconds = capturedBrowserAudio.durationSeconds;
+    const text = await client.transcribe(capturedBrowserAudio.snapshot(), mode);
+    if (!text.trim()) {
+      throw new Error('本地模型没有识别出文字。你可以保留音频后重试。');
+    }
+    await workerStateQueue;
+    const current = await getCaptureState();
+    const completed: CaptureState = {
+      ...current,
+      active: false,
+      canRetry: false,
+      error: undefined,
+      errorCode: undefined,
+      mode,
+      phase: 'complete',
+      route: 'browser-local',
+      transcript: text
+    };
+    const syncInput = {
+      bridge,
+      durationSeconds,
+      tabTitle: tabTitle ?? '当前 Chrome 标签页',
+      transcript: text
+    };
+    await saveCaptureState(completed);
+    capturedBrowserAudio.clear();
+    void syncBrowserTranscriptToDesktop(syncInput);
+  } catch (error) {
+    await workerStateQueue;
+    const current = await getCaptureState();
+    const errorCode = error instanceof AsrWorkerOperationError
+      ? error.code === 'cancelled'
+        ? 'transcription-cancelled'
+        : 'transcription-timeout'
+      : undefined;
+    await saveCaptureState({
+      ...current,
+      active: false,
+      canRetry: true,
+      error: errorCode ? undefined : asError(error).message,
+      errorCode,
+      mode,
+      phase: 'error',
+      route: 'browser-local'
+    });
+  } finally {
+    scheduleAsrClientDisposal();
+  }
+}
+
+function getAsrClient(): AsrWorkerClient {
+  cancelAsrClientDisposal();
+  if (!asrClient) {
+    const worker = new Worker(chrome.runtime.getURL('asr-worker.js'), { type: 'module' });
+    let client: AsrWorkerClient;
+    client = new AsrWorkerClient(
+      worker,
+      (state) => {
+        if (asrClient !== client) {
+          return;
+        }
+        const update = workerStateQueue.then(() => publishWorkerState(state));
+        workerStateQueue = update.catch(() => undefined);
+      },
+      () => {
+        if (asrClient !== client) {
+          return;
+        }
+        cancelAsrClientDisposal();
+        asrClient = undefined;
+      }
+    );
+    asrClient = client;
+  }
+  return asrClient;
+}
+
+function scheduleAsrClientDisposal(): void {
+  cancelAsrClientDisposal();
+  const idleClient = asrClient;
+  if (!idleClient) {
+    return;
+  }
+  asrIdleTimer = setTimeout(() => {
+    asrIdleTimer = undefined;
+    if (asrClient !== idleClient) {
+      return;
+    }
+    asrClient = undefined;
+    void idleClient.dispose().catch(() => undefined);
+  }, ASR_WORKER_IDLE_MS);
+}
+
+function cancelAsrClientDisposal(): void {
+  if (asrIdleTimer) {
+    clearTimeout(asrIdleTimer);
+    asrIdleTimer = undefined;
+  }
+}
+
+async function publishWorkerState(workerState: BrowserTranscriberState): Promise<void> {
+  if (workerState.phase === 'idle' || workerState.phase === 'complete' || workerState.phase === 'error') {
+    return;
+  }
+  const current = await getCaptureState();
+  if (current.route !== 'browser-local') {
+    return;
+  }
+  await saveCaptureState({
+    ...current,
+    active: false,
+    mode: workerState.mode,
+    phase: workerState.phase,
+    progress: workerState.phase === 'downloading' ? workerState.progress : undefined
+  });
 }
 
 async function releaseAudioGraph(): Promise<void> {
-  workletNode?.disconnect();
+  if (workletNode) {
+    workletNode.port.onmessage = null;
+    workletNode.disconnect();
+  }
   workletNode = undefined;
   silentGain?.disconnect();
   silentGain = undefined;
@@ -120,45 +366,19 @@ async function releaseAudioGraph(): Promise<void> {
   audioContext = undefined;
 }
 
-function queueAudio(samples: Float32Array, sourceRate: number): void {
-  const wasAccepted = pendingAudio.append(downsampler.resample(samples, sourceRate));
-  if (!wasAccepted) {
-    void reportCaptureError(new Error('本机连接不可用，VOIVOX 仅保留了最近 60 秒待发送的标签页音频。请恢复桌面 App 后点击停止重试。'));
+function queueAudio(samples: Float32Array, sourceRate: number, generation: number): void {
+  if (generation !== captureGeneration) {
+    return;
   }
-  if (pendingAudio.size >= 4_000) {
-    void flushAudio().catch((error: unknown) => void reportCaptureError(asError(error)));
+  const resampled = downsampler.resample(samples, sourceRate);
+  if (route !== 'browser-local') {
+    return;
   }
-}
-
-async function flushAudio(): Promise<void> {
-  while (true) {
-    if (flushWork) {
-      await flushWork;
-      continue;
-    }
-    if (!sessionId || pendingAudio.size === 0) {
-      return;
-    }
-    const pending = pendingAudio.take();
-    const work = localRequest(`/v1/extension/captures/${encodeURIComponent(sessionId)}/audio`, {
-      method: 'POST',
-      body: JSON.stringify({
-        encoding: 'pcm-s16le',
-        sampleRate: 16_000,
-        channels: 1,
-        data: bytesToBase64(float32ToPcm16(pending.samples))
-      })
-    }).then(() => {
-      pendingAudio.acknowledge(pending.count);
-    });
-    flushWork = work;
-    try {
-      await work;
-    } finally {
-      if (flushWork === work) {
-        flushWork = undefined;
-      }
-    }
+  const accepted = capturedBrowserAudio.append(resampled);
+  if (!accepted && !captureLimitReached) {
+    captureLimitReached = true;
+    void serializeCaptureOperation(() => stopCapture())
+      .catch((error: unknown) => enqueueCaptureError(asError(error)));
   }
 }
 
@@ -166,27 +386,31 @@ async function reportCaptureError(error: Error): Promise<void> {
   const current = await getCaptureState();
   await saveCaptureState({
     ...current,
-    active: Boolean(sessionId),
-    sessionId,
-    error: error.message
+    error: error.message,
+    phase: 'error'
   });
+}
+
+function enqueueCaptureError(error: Error, expectedGeneration?: number): void {
+  void serializeCaptureOperation(async () => {
+    if (expectedGeneration !== undefined && expectedGeneration !== captureGeneration) {
+      return;
+    }
+    await reportCaptureError(error);
+  }).catch(() => undefined);
+}
+
+function resetCaptureBuffers(): void {
+  capturedBrowserAudio.clear();
+  downsampler.reset();
 }
 
 function asError(error: unknown): Error {
-  return error instanceof Error ? error : new Error('VOIVOX Chrome capture failed.');
+  return error instanceof Error ? error : new Error('VOIVOX 标签页收录失败。');
 }
 
-async function localRequest(path: string, options: RequestInit): Promise<Response> {
-  if (!bridge) {
-    throw new Error('VOIVOX Chrome bridge is not paired.');
-  }
-  const response = await fetch(`${bridge.baseUrl}${path}`, {
-    ...options,
-    headers: { authorization: `Bearer ${bridge.token}`, 'content-type': 'application/json' }
-  });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({} as { error?: string }));
-    throw new Error(error.error ?? '桌面 VOIVOX 拒绝了这段标签页声音。');
-  }
-  return response;
+function serializeCaptureOperation<T>(operation: () => Promise<T>): Promise<T> {
+  const result = operationTail.then(operation, operation);
+  operationTail = result.then(() => undefined, () => undefined);
+  return result;
 }

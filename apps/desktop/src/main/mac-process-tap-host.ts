@@ -16,14 +16,48 @@ type ActiveRecording = {
   outputPath: string;
 };
 
+type ProcessTapHostOptions = {
+  commandTimeoutMs?: number;
+  startTimeoutMs?: number;
+  terminationGraceMs?: number;
+};
+
+const DEFAULT_COMMAND_TIMEOUT_MS = 10_000;
+const DEFAULT_START_TIMEOUT_MS = 10_000;
+const DEFAULT_TERMINATION_GRACE_MS = 2_000;
+const timedOut = Symbol('timedOut');
+
 export class MacProcessTapHost {
   private readonly recordings = new Map<string, ActiveRecording>();
+  private readonly commandTimeoutMs: number;
+  private readonly startTimeoutMs: number;
+  private readonly terminationGraceMs: number;
 
-  constructor(private readonly binaryPath: string) {}
+  constructor(
+    private readonly binaryPath: string,
+    options: ProcessTapHostOptions = {}
+  ) {
+    this.commandTimeoutMs = options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
+    this.startTimeoutMs = options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS;
+    this.terminationGraceMs = options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS;
+    if (
+      !isPositiveTimeout(this.commandTimeoutMs)
+      || !isPositiveTimeout(this.startTimeoutMs)
+      || !isPositiveTimeout(this.terminationGraceMs)
+    ) {
+      throw new Error('VOIVOX process host timeouts must be positive numbers.');
+    }
+  }
 
   async listProcesses(): Promise<MacAudioProcess[]> {
     const child = spawn(this.binaryPath, ['list'], { stdio: 'pipe' });
-    const output = await collect(child);
+    const completion = collect(child);
+    const outcome = await settleWithin(completion, this.commandTimeoutMs);
+    if (outcome === timedOut) {
+      await terminateChild(child, completion, 'SIGTERM', this.terminationGraceMs);
+      throw new Error(`VOIVOX process host did not list apps within ${this.commandTimeoutMs} ms.`);
+    }
+    const output = outcome;
     const parsed: unknown = JSON.parse(output.stdout);
     if (!Array.isArray(parsed)) {
       throw new Error('VOIVOX process host returned an invalid process list.');
@@ -42,11 +76,10 @@ export class MacProcessTapHost {
     this.recordings.set(sessionId, recording);
 
     try {
-      await waitForStart(child);
+      await waitForStart(child, this.startTimeoutMs);
     } catch (error) {
+      await terminateChild(child, recording.completion, 'SIGINT', this.terminationGraceMs);
       this.recordings.delete(sessionId);
-      child.kill('SIGINT');
-      await recording.completion.catch(() => undefined);
       await rm(directory, { force: true, recursive: true });
       throw error;
     }
@@ -57,11 +90,13 @@ export class MacProcessTapHost {
     if (!recording) {
       return undefined;
     }
+    const result = await terminateChild(
+      recording.child,
+      recording.completion,
+      'SIGINT',
+      this.terminationGraceMs
+    );
     this.recordings.delete(sessionId);
-    if (recording.child.exitCode === null && !recording.child.killed) {
-      recording.child.kill('SIGINT');
-    }
-    const result = await recording.completion;
     if (result.code !== 0) {
       await rm(recording.directory, { force: true, recursive: true });
       throw new Error(result.stderr || 'VOIVOX process host could not stop the capture.');
@@ -74,11 +109,13 @@ export class MacProcessTapHost {
     if (!recording) {
       return;
     }
+    await terminateChild(
+      recording.child,
+      recording.completion,
+      'SIGINT',
+      this.terminationGraceMs
+    );
     this.recordings.delete(sessionId);
-    if (recording.child.exitCode === null && !recording.child.killed) {
-      recording.child.kill('SIGINT');
-    }
-    await recording.completion.catch(() => undefined);
     await rm(recording.directory, { force: true, recursive: true });
   }
 
@@ -95,11 +132,15 @@ function isMacAudioProcess(value: unknown): value is MacAudioProcess {
   return typeof process.pid === 'number' && typeof process.name === 'string' && typeof process.bundleId === 'string';
 }
 
-function waitForStart(child: ChildProcessWithoutNullStreams): Promise<void> {
+function waitForStart(child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
     let stdout = '';
     let stderr = '';
-    const timeout = setTimeout(() => reject(new Error('VOIVOX process host did not start within 10 seconds.')), 10_000);
+    const timeout = setTimeout(
+      () => reject(new Error(`VOIVOX process host did not start within ${timeoutMs} ms.`)),
+      timeoutMs
+    );
+    timeout.unref();
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
@@ -138,4 +179,51 @@ function collect(child: ChildProcessWithoutNullStreams): Promise<{ code: number 
     child.once('error', reject);
     child.once('exit', (code) => resolve({ code, stderr, stdout }));
   });
+}
+
+async function terminateChild<T>(
+  child: ChildProcessWithoutNullStreams,
+  completion: Promise<T>,
+  gracefulSignal: NodeJS.Signals,
+  graceMs: number
+): Promise<T> {
+  if (!hasExited(child)) {
+    child.kill(gracefulSignal);
+  }
+  const graceful = await settleWithin(completion, graceMs);
+  if (graceful !== timedOut) {
+    return graceful;
+  }
+
+  if (!hasExited(child)) {
+    child.kill('SIGKILL');
+  }
+  const forced = await settleWithin(completion, graceMs);
+  if (forced !== timedOut) {
+    return forced;
+  }
+  throw new Error('VOIVOX process host could not be terminated.');
+}
+
+async function settleWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<T | typeof timedOut> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<typeof timedOut>((resolve) => {
+        timeout = setTimeout(() => resolve(timedOut), timeoutMs);
+        timeout.unref();
+      })
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function hasExited(child: ChildProcessWithoutNullStreams): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+function isPositiveTimeout(value: number): boolean {
+  return Number.isFinite(value) && value > 0;
 }

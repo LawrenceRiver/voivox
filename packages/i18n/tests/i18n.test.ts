@@ -53,4 +53,25 @@ describe('message catalogs', () => {
       Object.keys(messages['zh-CN']).sort(),
     );
   });
+
+  it('labels transcription cancellation and timeout accurately in both languages', () => {
+    const zh = messages['zh-CN'] as Readonly<Record<string, string>>;
+    const en = messages.en as Readonly<Record<string, string>>;
+
+    expect(zh['capture.cancelTranscription']).toBe('取消转写');
+    expect(en['capture.cancelTranscription']).toBe('Cancel transcription');
+    expect(zh['error.transcriptionCancelled']).toContain('已取消');
+    expect(en['error.transcriptionCancelled']).toContain('cancelled');
+    expect(zh['error.transcriptionTimedOut']).toContain('超时');
+    expect(en['error.transcriptionTimedOut']).toContain('timed out');
+  });
+
+  it('explains the optional App text-only sync boundary in both popup languages', () => {
+    expect(messages['zh-CN']['connection.browserHint']).toBe(
+      'App 可选。音频始终在浏览器本地转写；App 打开时只自动同步完成的文字。',
+    );
+    expect(messages.en['connection.browserHint']).toBe(
+      'The App is optional. Audio always stays browser-local; when the App is open, only completed text auto-syncs.',
+    );
+  });
 });

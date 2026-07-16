@@ -6,7 +6,7 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   package:
@@ -22,9 +22,49 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run typecheck
+      - run: swift test
+        working-directory: native/macos
       - run: npm run package:mac --workspace=@voivox/desktop
+      - run: npm run package:zip --workspace=@voivox/chrome-extension
+      - name: Generate SHA-256 checksums
+        run: |
+          : > SHA256SUMS.txt
+          for artifact in \
+            apps/desktop/release/VOIVOX-*.dmg \
+            apps/desktop/release/VOIVOX-*.zip \
+            apps/chrome-extension/release/VOIVOX-*.zip
+          do
+            checksum="$(shasum -a 256 "$artifact" | awk '{print $1}')"
+            printf '%s  %s\n' "$checksum" "$(basename "$artifact")" >> SHA256SUMS.txt
+          done
       - uses: actions/upload-artifact@v4
         with:
-          name: VOIVOX-macos-arm64-unsigned
-          path: apps/desktop/release/*
+          name: VOIVOX-judge-builds
+          path: |
+            apps/desktop/release/VOIVOX-*.dmg
+            apps/desktop/release/VOIVOX-*.zip
+            apps/desktop/release/VOIVOX-*.blockmap
+            apps/chrome-extension/release/VOIVOX-*.zip
+            SHA256SUMS.txt
           if-no-files-found: error
+      - name: Publish tagged GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" \
+              apps/desktop/release/VOIVOX-*.dmg \
+              apps/desktop/release/VOIVOX-*.zip \
+              apps/chrome-extension/release/VOIVOX-*.zip \
+              SHA256SUMS.txt \
+              --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              apps/desktop/release/VOIVOX-*.dmg \
+              apps/desktop/release/VOIVOX-*.zip \
+              apps/chrome-extension/release/VOIVOX-*.zip \
+              SHA256SUMS.txt \
+              --generate-notes \
+              --title "VOIVOX $GITHUB_REF_NAME"
+          fi
