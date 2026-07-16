@@ -18,7 +18,7 @@
 > **让声音安静地变成可处理的文本。** VOIVOX 是一个 local-first 的 macOS 音频转写工作台：选定一个 App 或当前 Chrome 标签页，静音收录、在本机转写，再交给 Codex 或任何你选择的 LLM 处理。
 
 <p align="center">
-  <img src="docs/assets/voivox-overview.svg" width="100%" alt="VOIVOX：Chrome 扩展、桌面 App 与 Codex MCP 的本机工作流总览" />
+  <img src="docs/assets/voivox-overview.png" width="100%" alt="VOIVOX：Chrome Extension、VOIVOX App 与 Codex MCP 共享本地转写核心" />
 </p>
 
 ## Actual source-selection example
