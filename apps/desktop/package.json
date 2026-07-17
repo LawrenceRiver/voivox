@@ -1,7 +1,7 @@
 {
   "name": "@voivox/desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "VOIVOX local-first, silent audio-to-text workstation for macOS.",
   "author": "VOIVOX contributors",
   "type": "module",

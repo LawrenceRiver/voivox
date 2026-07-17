@@ -15,7 +15,7 @@ describe('discoverDesktopApp', () => {
       capabilities: { extensionDiscovery: true, localAsr: 'ready' },
       service: 'voivox',
       status: 'ready',
-      version: '0.1.0'
+      version: '0.1.1'
     }));
 
     const result = await discoverDesktopApp({ fetcher });
@@ -37,7 +37,7 @@ describe('discoverDesktopApp', () => {
         capabilities: { extensionDiscovery: true, localAsr },
         service: 'voivox',
         status: 'ready',
-        version: '0.1.0'
+        version: '0.1.1'
       }));
 
       await expect(discoverDesktopApp({ fetcher })).resolves.toEqual({
@@ -55,7 +55,7 @@ describe('discoverDesktopApp', () => {
       capabilities: { extensionDiscovery: false, localAsr: 'ready' },
       service: 'voivox',
       status: 'ready',
-      version: '0.1.0'
+      version: '0.1.1'
     }));
 
     await expect(discoverDesktopApp({ fetcher })).resolves.toEqual({

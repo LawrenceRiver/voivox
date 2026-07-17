@@ -31,6 +31,47 @@ describe('service worker capture reliability', () => {
     expect(harness.savedState).toEqual(state);
   });
 
+  it('owns capture-state storage for the offscreen document', async () => {
+    const harness = await createHarness({ active: false, mode: 'quality', phase: 'idle' });
+    const capturing: CaptureState = {
+      active: true,
+      mode: 'fast',
+      phase: 'capturing',
+      route: 'browser-local',
+      sessionId: 'browser-runtime-state',
+      tabTitle: 'Runtime-only offscreen tab'
+    };
+
+    const saved = await harness.dispatch({
+      state: capturing,
+      target: 'service-worker',
+      type: 'capture-state:save'
+    });
+    const loaded = await harness.dispatch({ target: 'service-worker', type: 'capture-state:get' });
+
+    expect(saved).toEqual(capturing);
+    expect(loaded).toEqual(capturing);
+    expect(harness.savedState).toEqual(capturing);
+  });
+
+  it('accepts offscreen state writes while a capture toggle is still running', async () => {
+    const harness = await createHarness(
+      { active: false, mode: 'quality', phase: 'idle' },
+      false,
+      undefined,
+      false,
+      false,
+      false,
+      false,
+      true
+    );
+
+    const state = await harness.dispatch({ target: 'service-worker', type: 'capture:toggle' });
+
+    expect(state).toMatchObject({ active: true, phase: 'capturing', route: 'browser-local' });
+    expect(harness.savedState).toEqual(state);
+  });
+
   it('keeps Chrome tab audio browser-local when the App ASR is ready', async () => {
     const harness = await createHarness(
       { active: false, mode: 'quality', phase: 'idle' },
@@ -179,7 +220,8 @@ async function createHarness(
   nativeDesktopReady = false,
   failFirstStart = false,
   delayErrorWrite = false,
-  initialHasOffscreenDocument = false
+  initialHasOffscreenDocument = false,
+  publishStateDuringStart = false
 ): Promise<{
   createDocumentCalls: () => number;
   dispatch: (message: unknown) => Promise<CaptureState>;
@@ -241,7 +283,7 @@ async function createHarness(
           if (failFirstStart && startAttempts === 1) {
             return { error: 'first start failed' };
           }
-          state = stateAfterStart ?? {
+          const startedState = stateAfterStart ?? {
             active: true,
             mode: message.mode === 'fast' ? 'fast' : 'quality',
             phase: 'capturing',
@@ -249,6 +291,25 @@ async function createHarness(
             sessionId: 'browser-session',
             tabTitle: 'Current tab'
           };
+          if (publishStateDuringStart) {
+            await new Promise<CaptureState>((resolve, reject) => {
+              const timeout = setTimeout(() => reject(new Error('Nested state write timed out.')), 250);
+              const keepAlive = listener?.(
+                { state: startedState, target: 'service-worker', type: 'capture-state:save' },
+                {} as chrome.runtime.MessageSender,
+                (response) => {
+                  clearTimeout(timeout);
+                  resolve(response);
+                }
+              );
+              if (!keepAlive) {
+                clearTimeout(timeout);
+                reject(new Error('Nested state write did not keep the channel alive.'));
+              }
+            });
+          } else {
+            state = startedState;
+          }
           return { sessionId: 'browser-session' };
         }
         if (message.type === 'audio:cancel') {

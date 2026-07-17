@@ -13,9 +13,15 @@ type RawSpeechRecognitionPipeline = {
     audio: Float32Array,
     options?: {
       chunk_length_s?: number;
+      do_sample?: boolean;
+      force_full_sequences?: boolean;
+      max_new_tokens?: number;
+      no_repeat_ngram_size?: number;
+      repetition_penalty?: number;
       return_timestamps?: boolean;
       stride_length_s?: number;
       task?: string;
+      top_k?: number;
     }
   ): Promise<RawSpeechRecognitionOutput>;
   dispose(): Promise<void> | void;
@@ -49,20 +55,21 @@ export type TransformersModule = {
 };
 
 export type TransformersPipelineOptions = {
-  hasWebGpu?: () => boolean;
   loadTransformers?: () => Promise<TransformersModule>;
   wasmBaseUrl: string;
 };
 
 export function createTransformersPipelineFactory({
-  hasWebGpu = defaultHasWebGpu,
   loadTransformers = loadTransformersModule,
   wasmBaseUrl
 }: TransformersPipelineOptions): PipelineFactory {
   return async (task, modelId, options) => {
     const transformers = await loadTransformers();
     configureEnvironment(transformers, wasmBaseUrl);
-    const devices: Device[] = hasWebGpu() ? ['webgpu', 'wasm'] : ['wasm'];
+    // q8 Whisper is compact and reliable on WASM. Transformers.js does not
+    // recommend q8 on WebGPU yet; it can produce invalid decoder output on
+    // otherwise supported GPUs.
+    const devices: Device[] = ['wasm'];
     let lastFailure: unknown;
 
     for (const device of devices) {
@@ -98,9 +105,15 @@ function adaptPipeline(rawPipeline: RawSpeechRecognitionPipeline): SpeechRecogni
   const transcribe = async (audio: Float32Array): Promise<{ text: string }> => {
     const output = await rawPipeline(audio, {
       chunk_length_s: 30,
+      do_sample: false,
+      force_full_sequences: false,
+      max_new_tokens: Math.min(256, Math.max(32, Math.ceil(audio.length / 16_000 * 6))),
+      no_repeat_ngram_size: 3,
+      repetition_penalty: 1.1,
       return_timestamps: false,
       stride_length_s: 5,
-      task: 'transcribe'
+      task: 'transcribe',
+      top_k: 0
     });
     const text = Array.isArray(output)
       ? output.map((result) => result.text.trim()).filter(Boolean).join(' ')
@@ -110,10 +123,6 @@ function adaptPipeline(rawPipeline: RawSpeechRecognitionPipeline): SpeechRecogni
   return Object.assign(transcribe, {
     dispose: () => rawPipeline.dispose()
   });
-}
-
-function defaultHasWebGpu(): boolean {
-  return typeof navigator !== 'undefined' && 'gpu' in navigator;
 }
 
 async function loadTransformersModule(): Promise<TransformersModule> {

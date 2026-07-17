@@ -1,7 +1,7 @@
 {
   "name": "@voivox/mcp",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "bin": {
     "voivox-mcp": "./dist/index.js"

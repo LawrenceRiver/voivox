@@ -1,5 +1,6 @@
 import {
   getCaptureState,
+  normalizeCaptureState,
   saveCaptureState,
   type BridgeConfig,
   type CaptureState
@@ -12,6 +13,21 @@ let operationTail: Promise<void> = Promise.resolve();
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.target !== 'service-worker') {
     return;
+  }
+
+  if (message.type === 'capture-state:get' || message.type === 'capture-state:save') {
+    const stateWork = message.type === 'capture-state:get'
+      ? getCaptureState()
+      : persistOffscreenCaptureState(message.state);
+    void stateWork.then(sendResponse).catch((error: unknown) => {
+      sendResponse({
+        active: false,
+        error: error instanceof Error ? error.message : '无法读写扩展本地状态。',
+        mode: 'quality',
+        phase: 'error'
+      } satisfies CaptureState);
+    });
+    return true;
   }
 
   const operation = message.type === 'capture:toggle'
@@ -50,6 +66,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   });
   return true;
 });
+
+async function persistOffscreenCaptureState(value: unknown): Promise<CaptureState> {
+  const state = normalizeCaptureState(value);
+  await saveCaptureState(state);
+  return state;
+}
 
 async function toggleCapture(): Promise<CaptureState> {
   const current = await getCaptureState();

@@ -49,11 +49,19 @@ The visible opening card supports the final clause, but this is a smoke test—n
 
 The rebuilt packaged App then accepted that transcript through its restricted Chrome bridge. Its bundled MCP launcher—using the App's embedded Node runtime—listed the local session and read back the same immutable text. The [packaged App + MCP smoke record](docs/evidence/voivox-packaged-app-mcp-smoke.md) preserves the artifact hashes, assertions, and privacy-safe result.
 
+### Live Chrome tab-capture acceptance
+
+<p align="center">
+  <img src="docs/assets/voivox-live-tab-transcription.jpg" width="420" alt="VOIVOX Chrome extension showing a completed local transcription from a live Xiaohongshu tab" />
+</p>
+
+The unpacked extension was also invoked through the real Chrome UI against a playing Xiaohongshu video. It muted host playback, captured the tab audio, downloaded the pinned Quality model, ran q8 Whisper through bundled ONNX Runtime WASM, and displayed the completed raw text above. This acceptance run found and fixed two Chrome-only lifecycle bugs that unit mocks had missed. The [live tab-capture record](docs/evidence/voivox-live-tab-capture.md) documents the reproduction, fix, and limitations of this noisy music-video sample.
+
 ## Judge / first-use path
 
 Download the latest judge artifacts from [GitHub Releases](https://github.com/LawrenceRiver/voivox/releases), then:
 
-1. Unzip `VOIVOX-Chrome-Extension-0.1.0.zip`.
+1. Unzip `VOIVOX-Chrome-Extension-0.1.1.zip`.
 2. Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the unzipped folder.
 3. Pin VOIVOX, open a playing tab, choose **Fast** or **Quality**, and click the large capture button.
 4. Stop capture to get text. The first run downloads and caches the selected pinned model; transcription itself stays local.
@@ -68,7 +76,7 @@ The current App candidate is ad-hoc signed for bundle integrity, but it is not D
 | Fast | `onnx-community/whisper-tiny` q8 | 45 MB | quick drafts and shorter clips |
 | Quality | `onnx-community/whisper-base` q8 | 80 MB | better multilingual recognition |
 
-Each model is pinned to an exact repository revision in source. VOIVOX tries WebGPU first and falls back to bundled ONNX Runtime WASM. A capture is limited to ten minutes; model memory is released after inactivity. During model download or transcription, the same main button cancels the work. Cancelled, failed, or timed-out audio remains only in extension memory for Retry and is cleared after success, a new capture, extension reload/update, or Chrome exit.
+Each model is pinned to an exact repository revision in source. VOIVOX deliberately runs the compact q8 models through bundled single-thread ONNX Runtime WASM; current Transformers.js guidance does not recommend q8 Whisper on WebGPU. A capture is limited to ten minutes; model memory is released after inactivity. During model download or transcription, the same main button cancels the work. Cancelled, failed, or timed-out audio remains only in extension memory for Retry and is cleared after success, a new capture, extension reload/update, or Chrome exit.
 
 ## Codex MCP
 

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "VOIVOX Tab Capture",
   "description": "Silently transcribe the active tab with a local model, with an optional VOIVOX desktop companion.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minimum_chrome_version": "116",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxo7ryXOtjQ6gNeCheuRmAYIGXYrTvXwN0PCUoSwRiQqYmKb/aTAyO/46MMc+fezPhlHJvGzbdtAQ515Q49m+7mdzafvY2oE6x93JSpWIT3W4Tf7MwuhzhxwgHcSCgSfNC37OZjiYajuIU51LLnWpbcr10uU7F1KXmqTU2LsyAbdN9fgsnEdJ6kLbZt9ifcwUoi5mNwZoYGmSiYZWU8tvhWE5hCXm4Zw7DSRKPkmFurxGh5gDXQabcgws3M53iIojSy5H2YRBRh1Hai8fHzcxpcfq84ZO3lkoVVBVxDOmxtRGmXdpSm3J72OfauZnp8KLybJX2c1aKa1BiyWAQZj64QIDAQAB",
   "action": {

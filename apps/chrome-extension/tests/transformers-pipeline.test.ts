@@ -6,21 +6,21 @@ import {
 } from '../src/transformers-pipeline.js';
 
 describe('Transformers.js pipeline adapter', () => {
-  it('configures local WASM, tries WebGPU first, then falls back to single-thread WASM', async () => {
+  it('keeps q8 Whisper on single-thread WASM even when WebGPU is available', async () => {
     const devices: string[] = [];
+    let inferenceOptions: Record<string, unknown> | undefined;
     let disposeCalls = 0;
     const module = fakeTransformersModule(async (_task, _model, options) => {
       devices.push(options.device);
-      if (options.device === 'webgpu') {
-        throw new Error('WebGPU operator unavailable');
-      }
       return Object.assign(
-        async () => [{ text: ' 第一段 ' }, { text: '第二段 ' }],
+        async (_audio: Float32Array, options?: Record<string, unknown>) => {
+          inferenceOptions = options;
+          return [{ text: ' 第一段 ' }, { text: '第二段 ' }];
+        },
         { dispose: async () => { disposeCalls += 1; } }
       );
     });
     const factory = createTransformersPipelineFactory({
-      hasWebGpu: () => true,
       loadTransformers: async () => module,
       wasmBaseUrl: 'chrome-extension://voivox/wasm/'
     });
@@ -31,7 +31,7 @@ describe('Transformers.js pipeline adapter', () => {
       revision: 'pinned-revision'
     });
 
-    expect(devices).toEqual(['webgpu', 'wasm']);
+    expect(devices).toEqual(['wasm']);
     expect(module.env).toMatchObject({
       allowLocalModels: false,
       allowRemoteModels: true,
@@ -43,6 +43,14 @@ describe('Transformers.js pipeline adapter', () => {
       wasmPaths: 'chrome-extension://voivox/wasm/'
     });
     await expect(pipeline(new Float32Array([0.1]))).resolves.toEqual({ text: '第一段 第二段' });
+    expect(inferenceOptions).toMatchObject({
+      do_sample: false,
+      force_full_sequences: false,
+      max_new_tokens: 32,
+      no_repeat_ngram_size: 3,
+      repetition_penalty: 1.1,
+      top_k: 0
+    });
     await pipeline.dispose();
     expect(disposeCalls).toBe(1);
   });
@@ -54,7 +62,6 @@ describe('Transformers.js pipeline adapter', () => {
     ));
     const module = fakeTransformersModule(pipelineFactory);
     const factory = createTransformersPipelineFactory({
-      hasWebGpu: () => false,
       loadTransformers: async () => module,
       wasmBaseUrl: 'chrome-extension://voivox/wasm/'
     });
