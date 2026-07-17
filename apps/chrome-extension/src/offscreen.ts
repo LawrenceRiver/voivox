@@ -1,8 +1,7 @@
 import { StreamingDownsampler } from './audio-codec.js';
 import { AsrWorkerClient, AsrWorkerOperationError } from './asr-worker-client.js';
 import {
-  getCaptureState,
-  saveCaptureState,
+  normalizeCaptureState,
   type BridgeConfig,
   type CaptureState
 } from './bridge.js';
@@ -32,6 +31,22 @@ let captureLimitReached = false;
 let captureGeneration = 0;
 let downsampler = new StreamingDownsampler();
 const capturedBrowserAudio = new CapturedAudio({ maximumSeconds: 10 * 60, sampleRate: 16_000 });
+
+async function getCaptureState(): Promise<CaptureState> {
+  const state = await chrome.runtime.sendMessage({
+    target: 'service-worker',
+    type: 'capture-state:get'
+  });
+  return normalizeCaptureState(state);
+}
+
+async function saveCaptureState(state: CaptureState): Promise<void> {
+  await chrome.runtime.sendMessage({
+    state,
+    target: 'service-worker',
+    type: 'capture-state:save'
+  });
+}
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.target !== 'offscreen') {

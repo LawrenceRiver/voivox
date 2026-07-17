@@ -24,7 +24,7 @@ describe('VOIVOX loopback API', () => {
     expect(await health.json()).toEqual({
       service: 'voivox',
       status: 'ready',
-      version: '0.1.0',
+      version: '0.1.1',
       capabilities: { extensionDiscovery: false, localAsr: 'missing' }
     });
 
@@ -343,7 +343,7 @@ describe('VOIVOX loopback API', () => {
     expect(await first.json()).toEqual({
       service: 'voivox',
       status: 'ready',
-      version: '0.1.0',
+      version: '0.1.1',
       capabilities: { extensionDiscovery: true, localAsr: 'checking' }
     });
 

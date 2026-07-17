@@ -121,6 +121,24 @@ describe('offscreen capture reliability', () => {
     });
   });
 
+  it('persists state through runtime messaging when offscreen storage APIs are unavailable', async () => {
+    const harness = await createHarness({
+      initialState: { active: false, mode: 'quality', phase: 'idle' },
+      offscreenStorageAvailable: false
+    });
+
+    const started = await harness.dispatch(startMessage('browser-local'));
+
+    expect(started.sessionId).toMatch(/^browser_/u);
+    expect(harness.savedState).toMatchObject({
+      active: true,
+      phase: 'capturing',
+      route: 'browser-local',
+      sessionId: started.sessionId
+    });
+    expect(harness.stateMessages.map((message) => message.type)).toContain('capture-state:save');
+  });
+
   it('serializes start and stop operations', async () => {
     const harness = await createHarness({ deferMedia: true });
     asrMock.results.push('serialized transcript');
@@ -274,6 +292,7 @@ function startMessage(route: 'browser-local' | 'desktop-local'): Record<string, 
 async function createHarness(options: {
   deferMedia?: boolean;
   initialState?: CaptureState;
+  offscreenStorageAvailable?: boolean;
 } = {}): Promise<{
   captureAudioDispatcher: () => (audio: Float32Array) => void;
   dispatch: (message: unknown) => Promise<OffscreenResponse>;
@@ -281,6 +300,7 @@ async function createHarness(options: {
   hasActiveAudioHandler: () => boolean;
   releaseMedia: () => void;
   requestedUrls: string[];
+  stateMessages: Array<Record<string, unknown>>;
   readonly savedState: CaptureState;
   track: FakeTrack;
   waitForState: (predicate: (state: CaptureState) => boolean) => Promise<void>;
@@ -299,6 +319,7 @@ async function createHarness(options: {
     : Promise.resolve();
   const track = new FakeTrack();
   const requestedUrls: string[] = [];
+  const stateMessages: Array<Record<string, unknown>> = [];
 
   class TestAudioWorkletNode extends FakeAudioWorkletNode {
     constructor() {
@@ -318,16 +339,29 @@ async function createHarness(options: {
       })
     }
   });
-  vi.stubGlobal('chrome', {
+  const chromeStub: Record<string, unknown> = {
     runtime: {
       getURL: (path: string) => `chrome-extension://voivox/${path}`,
       onMessage: {
         addListener: vi.fn((registered: RuntimeListener) => {
           listener = registered;
         })
-      }
-    },
-    storage: {
+      },
+      sendMessage: vi.fn(async (message: Record<string, unknown>) => {
+        stateMessages.push(message);
+        if (message.type === 'capture-state:get') {
+          return state;
+        }
+        if (message.type === 'capture-state:save') {
+          state = message.state as CaptureState;
+          return state;
+        }
+        throw new Error(`Unexpected runtime message: ${String(message.type)}`);
+      })
+    }
+  };
+  if (options.offscreenStorageAvailable !== false) {
+    chromeStub.storage = {
       local: {
         get: vi.fn(async (key: string) => ({
           [key]: key === 'voivoxCaptureState' ? state : extraStorage[key]
@@ -346,8 +380,9 @@ async function createHarness(options: {
           }
         })
       }
-    }
-  });
+    };
+  }
+  vi.stubGlobal('chrome', chromeStub);
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
     const url = String(input);
     requestedUrls.push(url);
@@ -387,6 +422,7 @@ async function createHarness(options: {
     hasActiveAudioHandler: () => Boolean(activeNode?.port.onmessage),
     releaseMedia,
     requestedUrls,
+    stateMessages,
     get savedState() {
       return state;
     },

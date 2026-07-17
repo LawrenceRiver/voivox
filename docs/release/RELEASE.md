@@ -24,9 +24,9 @@ npm run package:zip --workspace=@voivox/chrome-extension
 
 Expected output:
 
-- `apps/desktop/release/VOIVOX-0.1.0-arm64.dmg`
-- `apps/desktop/release/VOIVOX-0.1.0-arm64.zip`
-- `apps/chrome-extension/release/VOIVOX-Chrome-Extension-0.1.0.zip`
+- `apps/desktop/release/VOIVOX-0.1.1-arm64.dmg`
+- `apps/desktop/release/VOIVOX-0.1.1-arm64.zip`
+- `apps/chrome-extension/release/VOIVOX-Chrome-Extension-0.1.1.zip`
 
 The App contains the selected-process native host, Native Messaging host, optional Python ASR worker, and a standalone Codex MCP bundle/launcher. Browser model weights are intentionally not embedded; Chrome downloads the selected pinned model on first use.
 
@@ -56,7 +56,7 @@ spctl --assess --type execute --verbose=4 /Applications/VOIVOX.app
 
 ## GitHub release
 
-- Tag the exact verified commit (for example `v0.1.0`).
+- Tag the exact verified commit (for example `v0.1.1`).
 - Let `.github/workflows/package-macos.yml` rebuild the candidate.
 - Attach the DMG, macOS ZIP, Chrome ZIP, checksums, and release notes.
 - State clearly that the judge build is ad-hoc signed but not Developer ID signed or notarized.

@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { VoivoxClient, type VoivoxConnection } from './voivox-client.js';
 
 export function createVoivoxMcpServer(voivox: VoivoxClient): McpServer {
-  const server = new McpServer({ name: 'voivox', version: '0.1.0' });
+  const server = new McpServer({ name: 'voivox', version: '0.1.1' });
 
   server.registerTool(
     'voivox_status',

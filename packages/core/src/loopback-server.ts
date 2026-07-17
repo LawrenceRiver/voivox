@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { type CaptureSession, VoivoxService } from './voivox-service.js';
 
 export const VOIVOX_EXTENSION_ORIGIN = 'chrome-extension://pepfpbobjbjehhhcjiokmneclohlffno';
-export const VOIVOX_VERSION = '0.1.0';
+export const VOIVOX_VERSION = '0.1.1';
 const NATIVE_PROOF_PATH = '/v1/native/proof';
 const NATIVE_PROOF_PROTOCOL_VERSION = 1;
 const NATIVE_PROOF_CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
