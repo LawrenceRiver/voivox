@@ -13,6 +13,11 @@ import {
   type CrossWindowSessionPatch
 } from './cross-window-session.js';
 import type { TranscriptResult } from './pvtt-contract.js';
+import {
+  EXTENSION_COMMAND_TYPES,
+  ExtensionCommandBroker,
+  type ExtensionCommandEnvelope
+} from './extension-command-broker.js';
 import { serializeVoiceVacError } from './voice-vac-error.js';
 import { VOICE_VAC_ERROR_CODES } from './voice-vac-error.js';
 
@@ -32,6 +37,8 @@ const MCP_PROOF_CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
 const MAXIMUM_JSON_BODY_BYTES = 1_500_000;
 const MAXIMUM_PCM_CHUNK_BYTES = 128 * 1024;
 const MAXIMUM_TRANSCRIPT_WAIT_MS = 25_000;
+const MAXIMUM_EXTENSION_COMMAND_WAIT_MS = 20_000;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export type LocalAsrStatus = 'checking' | 'ready' | 'missing';
 
@@ -93,10 +100,12 @@ export async function createVoivoxLoopbackServer(options: {
     request: ActiveVideoTranscriptionRequest
   ) => Promise<TranscriptResult | undefined>;
   extensionCaptureController?: ExtensionCaptureControllerPort;
+  extensionCommands?: ExtensionCommandBroker;
   tunnelSessions?: CrossWindowSessionStore;
 }): Promise<VoivoxLoopbackServer> {
   const service = options.service ?? new VoivoxService();
   const tunnelSessions = options.tunnelSessions ?? new CrossWindowSessionStore();
+  const extensionCommands = options.extensionCommands ?? new ExtensionCommandBroker();
   let actualBaseUrl: string | undefined;
   const server = createServer(async (request, response) => {
     try {
@@ -176,6 +185,39 @@ export async function createVoivoxLoopbackServer(options: {
         return;
       }
 
+      if (requestUrl?.pathname === '/v1/native/extension-commands') {
+        if (request.method !== 'GET') {
+          response.setHeader('allow', 'GET');
+          sendJson(response, 405, { error: 'Voice VAC native command polling requires GET.' });
+          return;
+        }
+        if (!options.extensionToken || !isAuthorized(request, options.extensionToken)) {
+          sendJson(response, 401, { error: 'Voice VAC restricted extension token required.' });
+          return;
+        }
+        const query = parseExtensionCommandPoll(requestUrl);
+        if (!query) {
+          sendJson(response, 400, { error: 'Voice VAC command polling requires valid after and wait cursors.' });
+          return;
+        }
+        const abortController = new AbortController();
+        const abortWait = () => abortController.abort();
+        request.once('aborted', abortWait);
+        response.once('close', abortWait);
+        if (request.aborted || response.destroyed) abortWait();
+        let batch;
+        try {
+          batch = await extensionCommands.waitAfter(query.after, query.wait, abortController.signal);
+        } finally {
+          request.off('aborted', abortWait);
+          response.off('close', abortWait);
+        }
+        if (abortController.signal.aborted) return;
+        response.setHeader('cache-control', 'no-store');
+        sendJson(response, 200, batch);
+        return;
+      }
+
       if (request.url?.startsWith('/v1/extension/')) {
         const origin = request.headers.origin;
         if (!origin || !VOIVOX_EXTENSION_ORIGINS.has(origin)) {
@@ -212,6 +254,16 @@ export async function createVoivoxLoopbackServer(options: {
 
       if (!isAuthorized(request, options.token)) {
         sendJson(response, 401, { error: 'Local Voice Vac bearer token required.' });
+        return;
+      }
+
+      if (request.method === 'POST' && requestUrl?.pathname === '/v1/extension-commands') {
+        const body = await readJson(request);
+        if (!isExtensionCommandEnvelope(body)) {
+          sendJson(response, 400, { error: 'A valid Voice VAC protocol-two extension command is required.' });
+          return;
+        }
+        sendJson(response, 201, extensionCommands.publish(body));
         return;
       }
 
@@ -374,8 +426,53 @@ export async function createVoivoxLoopbackServer(options: {
   actualBaseUrl = `http://127.0.0.1:${address.port}`;
   return {
     baseUrl: actualBaseUrl,
-    close: () => close(server)
+    close: async () => {
+      extensionCommands.close();
+      await close(server);
+    }
   };
+}
+
+function parseExtensionCommandPoll(url: URL): { after: number; wait: number } | undefined {
+  const entries = [...url.searchParams.entries()];
+  if (
+    entries.length !== 2
+    || entries.some(([key]) => key !== 'after' && key !== 'wait')
+    || url.searchParams.getAll('after').length !== 1
+    || url.searchParams.getAll('wait').length !== 1
+  ) {
+    return undefined;
+  }
+  const afterValue = url.searchParams.get('after');
+  const waitValue = url.searchParams.get('wait');
+  if (
+    afterValue === null
+    || waitValue === null
+    || !/^(0|[1-9]\d*)$/u.test(afterValue)
+    || !/^(0|[1-9]\d*)$/u.test(waitValue)
+  ) {
+    return undefined;
+  }
+  const after = Number(afterValue);
+  const wait = Number(waitValue);
+  if (!Number.isSafeInteger(after) || !Number.isSafeInteger(wait)) return undefined;
+  return { after, wait: Math.min(wait, MAXIMUM_EXTENSION_COMMAND_WAIT_MS) };
+}
+
+function isExtensionCommandEnvelope(value: Record<string, unknown>): value is ExtensionCommandEnvelope {
+  return hasOnlyKeys(
+    value,
+    new Set(['protocolVersion', 'commandId', 'sessionId', 'type', 'issuedAt'])
+  )
+    && value.protocolVersion === 2
+    && typeof value.commandId === 'string'
+    && UUID.test(value.commandId)
+    && typeof value.sessionId === 'string'
+    && UUID.test(value.sessionId)
+    && typeof value.type === 'string'
+    && (EXTENSION_COMMAND_TYPES as readonly string[]).includes(value.type)
+    && typeof value.issuedAt === 'number'
+    && Number.isFinite(value.issuedAt);
 }
 
 function parseMcpProofChallenge(url: URL): string | undefined {

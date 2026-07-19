@@ -1,5 +1,6 @@
 export * from './json-session-store.js';
 export * from './cross-window-session.js';
+export * from './extension-command-broker.js';
 export * from './loopback-server.js';
 export * from './mode-selector.js';
 export * from './pvtt-contract.js';

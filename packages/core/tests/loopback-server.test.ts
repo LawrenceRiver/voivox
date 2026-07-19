@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { createServer } from 'node:http';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createVoivoxLoopbackServer,
@@ -12,6 +12,15 @@ import {
 
 const VOIVOX_EXTENSION_ORIGIN = VOIVOX_STORE_EXTENSION_ORIGIN;
 import { VoiceVacError } from '../src/voice-vac-error.js';
+import { ExtensionCommandBroker } from '../src/extension-command-broker.js';
+
+const EXTENSION_COMMAND = {
+  protocolVersion: 2,
+  commandId: '11111111-1111-4111-8111-111111111111',
+  sessionId: '22222222-2222-4222-8222-222222222222',
+  type: 'capture-start',
+  issuedAt: 1_000
+} as const;
 
 describe('Voice Vac loopback API', () => {
   let server: VoivoxLoopbackServer | undefined;
@@ -55,6 +64,159 @@ describe('Voice Vac loopback API', () => {
 
     expect(response.status).toBe(403);
     expect(response.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('separates primary command publishing from restricted native polling', async () => {
+    server = await createVoivoxLoopbackServer({
+      token: 'desktop-only-token',
+      extensionToken: 'restricted-extension-token'
+    });
+
+    const rejectedPoll = await fetch(
+      `${server.baseUrl}/v1/native/extension-commands?after=0&wait=0`
+    );
+    expect(rejectedPoll.status).toBe(401);
+
+    const extensionCannotPublish = await fetch(`${server.baseUrl}/v1/extension-commands`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer restricted-extension-token',
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(EXTENSION_COMMAND)
+    });
+    expect(extensionCannotPublish.status).toBe(401);
+
+    const published = await fetch(`${server.baseUrl}/v1/extension-commands`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer desktop-only-token',
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(EXTENSION_COMMAND)
+    });
+    expect(published.status).toBe(201);
+    expect(await published.json()).toEqual(EXTENSION_COMMAND);
+
+    const primaryCannotPoll = await fetch(
+      `${server.baseUrl}/v1/native/extension-commands?after=0&wait=0`,
+      { headers: { authorization: 'Bearer desktop-only-token' } }
+    );
+    expect(primaryCannotPoll.status).toBe(401);
+
+    const accepted = await fetch(
+      `${server.baseUrl}/v1/native/extension-commands?after=0&wait=0`,
+      { headers: { authorization: 'Bearer restricted-extension-token' } }
+    );
+    expect(accepted.status).toBe(200);
+    expect(accepted.headers.get('cache-control')).toBe('no-store');
+    expect(await accepted.json()).toEqual({ cursor: 1, commands: [EXTENSION_COMMAND] });
+  });
+
+  it.each([
+    {},
+    { ...EXTENSION_COMMAND, protocolVersion: 1 },
+    { ...EXTENSION_COMMAND, commandId: 'not-a-uuid' },
+    { ...EXTENSION_COMMAND, sessionId: 'not-a-uuid' },
+    { ...EXTENSION_COMMAND, type: 'capture-explode' },
+    { ...EXTENSION_COMMAND, issuedAt: 'now' },
+    { ...EXTENSION_COMMAND, extra: true }
+  ])('rejects malformed desktop extension command %#', async (body) => {
+    server = await createVoivoxLoopbackServer({
+      token: 'desktop-only-token',
+      extensionToken: 'restricted-extension-token'
+    });
+
+    const response = await fetch(`${server.baseUrl}/v1/extension-commands`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer desktop-only-token',
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+
+    expect(response.status).toBe(400);
+  });
+
+  it('requires exact native polling query keys and clamps wait to twenty seconds', async () => {
+    const extensionCommands = new ExtensionCommandBroker();
+    let receivedWait: number | undefined;
+    const waitAfter = extensionCommands.waitAfter.bind(extensionCommands);
+    vi.spyOn(extensionCommands, 'waitAfter').mockImplementation((after, wait, signal) => {
+      receivedWait = wait;
+      return waitAfter(after, wait, signal);
+    });
+    server = await createVoivoxLoopbackServer({
+      token: 'desktop-only-token',
+      extensionToken: 'restricted-extension-token',
+      extensionCommands
+    });
+
+    for (const query of [
+      'after=-1&wait=0',
+      'after=0&wait=nan',
+      'after=0&wait=0&extra=1',
+      'wait=0',
+      'after=0'
+    ]) {
+      const response = await fetch(`${server.baseUrl}/v1/native/extension-commands?${query}`, {
+        headers: { authorization: 'Bearer restricted-extension-token' }
+      });
+      expect(response.status).toBe(400);
+    }
+
+    const reversed = await fetch(
+      `${server.baseUrl}/v1/native/extension-commands?wait=0&after=0`,
+      { headers: { authorization: 'Bearer restricted-extension-token' } }
+    );
+    expect(reversed.status).toBe(200);
+
+    const controller = new AbortController();
+    const polling = fetch(`${server.baseUrl}/v1/native/extension-commands?after=0&wait=999999`, {
+      headers: { authorization: 'Bearer restricted-extension-token' },
+      signal: controller.signal
+    });
+    await vi.waitFor(() => expect(receivedWait).toBe(20_000));
+    const published = await fetch(`${server.baseUrl}/v1/extension-commands`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer desktop-only-token',
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(EXTENSION_COMMAND)
+    });
+    expect(published.status).toBe(201);
+    expect((await polling).status).toBe(200);
+  });
+
+  it('cancels the broker wait as soon as a native command poll disconnects', async () => {
+    const extensionCommands = new ExtensionCommandBroker();
+    let receivedSignal: AbortSignal | undefined;
+    const waitAfter = extensionCommands.waitAfter.bind(extensionCommands);
+    vi.spyOn(extensionCommands, 'waitAfter').mockImplementation((after, wait, signal) => {
+      receivedSignal = signal;
+      return waitAfter(after, wait, signal);
+    });
+    server = await createVoivoxLoopbackServer({
+      token: 'desktop-only-token',
+      extensionToken: 'restricted-extension-token',
+      extensionCommands
+    });
+    const controller = new AbortController();
+    const polling = fetch(
+      `${server.baseUrl}/v1/native/extension-commands?after=0&wait=20000`,
+      {
+        headers: { authorization: 'Bearer restricted-extension-token' },
+        signal: controller.signal
+      }
+    );
+    await vi.waitFor(() => expect(receivedSignal).toBeDefined());
+
+    controller.abort();
+
+    await expect(polling).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.waitFor(() => expect(receivedSignal?.aborted).toBe(true));
   });
 
   it('keeps capture controls behind the local bearer token', async () => {
