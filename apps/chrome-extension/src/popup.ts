@@ -14,6 +14,7 @@ import type { TranscriptionMode } from './local-transcription.js';
 import { captureActionKey, isProcessingPhase } from './popup-presentation.js';
 
 const captureButton = requireElement<HTMLButtonElement>('capture');
+const actionLabel = requireElement<HTMLElement>('.popup-action-label');
 const copyButton = requireElement<HTMLButtonElement>('copy');
 const headline = requireElement<HTMLElement>('capture-heading');
 const languageButton = requireElement<HTMLButtonElement>('language');
@@ -55,6 +56,7 @@ async function initialize(): Promise<void> {
   );
   captureState = initialCaptureState;
   render();
+  void chrome.runtime.sendMessage({ target: 'service-worker', type: 'overlay:show' });
 }
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -100,7 +102,7 @@ async function sendAction(type: 'capture:toggle' | 'capture:retry'): Promise<voi
   } catch {
     captureState = {
       ...captureState,
-      error: locale === 'zh-CN' ? '无法连接扩展后台。请重新打开 VOIVOX。' : 'Could not reach the extension background. Reopen VOIVOX.',
+      error: locale === 'zh-CN' ? '无法连接扩展后台。请重新打开 Voice Vac。' : 'Could not reach the extension background. Reopen Voice Vac.',
       phase: 'error'
     };
   } finally {
@@ -132,7 +134,10 @@ function render(): void {
   document.body.className = phaseClass(captureState.phase);
   headline.textContent = t('app.tagline');
   stateLabel.textContent = t(statusKey(captureState.phase));
-  captureButton.textContent = t(captureActionKey(captureState));
+  const captureLabel = t(captureActionKey(captureState));
+  captureButton.textContent = captureState.active || isProcessingPhase(captureState.phase) ? 'Ⅱ' : '▶';
+  captureButton.setAttribute('aria-label', captureLabel);
+  actionLabel.textContent = captureLabel;
   message.textContent = captureMessage();
   languageButton.textContent = locale === 'zh-CN' ? 'EN' : '中';
   languageButton.setAttribute('aria-label', locale === 'zh-CN' ? 'Switch to English' : '切换到中文');

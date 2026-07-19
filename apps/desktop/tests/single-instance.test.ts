@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { enforceSingleInstance } from '../src/main/single-instance.js';
 
 describe('desktop single-instance lifecycle', () => {
-  it('quits before startup when another VOIVOX instance owns the lock', () => {
+  it('quits before startup when another Voice Vac instance owns the lock', () => {
     const quit = vi.fn();
     const on = vi.fn();
 

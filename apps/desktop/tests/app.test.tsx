@@ -26,8 +26,24 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('VOIVOX desktop app', () => {
-  it('shows the stop-motion mascot and automatic local connection states without secrets', async () => {
+describe('Voice Vac desktop app', () => {
+  it('uses the shared PVTT machine as the primary monitor surface', async () => {
+    const client: DesktopClient = {
+      getDashboard: vi.fn().mockResolvedValue({ activeSession: undefined, sessions: [] }),
+      getCapabilities: vi.fn().mockResolvedValue({ extensionDiscovery: true, localAsr: 'ready' }),
+      startCapture: vi.fn(),
+      stopCapture: vi.fn(),
+      appendDemoSegment: vi.fn()
+    };
+
+    render(<App desktopClient={client} />);
+
+    expect(await screen.findByText('字幕输出舱')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '连接到视频' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '检测视频' })).toBeTruthy();
+  });
+
+  it('shows the compact capsule and automatic local connection states without secrets', async () => {
     const client: DesktopClient = {
       getDashboard: vi.fn().mockResolvedValue({ activeSession: undefined, sessions: [] }),
       getCapabilities: vi.fn().mockResolvedValue({ extensionDiscovery: true, localAsr: 'ready' }),
@@ -38,10 +54,10 @@ describe('VOIVOX desktop app', () => {
 
     render(<App desktopClient={client} />);
 
-    expect(await screen.findByRole('heading', { name: '让播放中的声音，安静地变成文字' })).toBeTruthy();
+    expect(await screen.findByText('字幕输出舱')).toBeTruthy();
     expect(screen.getByText('01 · 声音来源')).toBeTruthy();
     expect(screen.queryByText('01 · SOURCE')).toBeNull();
-    expect(screen.getByRole('img', { name: 'VOIVOX 定格动画角色' })).toBeTruthy();
+    expect(screen.getByText('PVTT')).toBeTruthy();
     expect(await screen.findByText('App 转写运行时已发现')).toBeTruthy();
     expect(screen.getByText('扩展自动连接')).toBeTruthy();
     expect(screen.getByText('MCP 服务已就绪')).toBeTruthy();
@@ -61,7 +77,7 @@ describe('VOIVOX desktop app', () => {
     render(<App desktopClient={client} />);
     fireEvent.click(await screen.findByRole('button', { name: '切换到 English' }));
 
-    expect(await screen.findByRole('heading', { name: 'Turn playing audio into text, quietly' })).toBeTruthy();
+    expect(await screen.findByText('TRANSCRIPT BAY')).toBeTruthy();
     expect(screen.getByText('01 · SOURCE')).toBeTruthy();
     expect(screen.getByText('Runs standalone')).toBeTruthy();
     expect(window.localStorage.getItem('voivoxLocale')).toBe('en');
@@ -83,9 +99,9 @@ describe('VOIVOX desktop app', () => {
 
     render(<App desktopClient={client} />);
     expect(await screen.findByText('准备就绪')).toBeTruthy();
-    reportAsrError?.('VOIVOX local ASR is not installed.');
+    reportAsrError?.('Voice Vac local ASR is not installed.');
 
-    expect(await screen.findByText('VOIVOX local ASR is not installed.')).toBeTruthy();
+    expect(await screen.findByText('Voice Vac local ASR is not installed.')).toBeTruthy();
   });
 
   it('does not expose or call the inert desktop capture-mode control for either source', async () => {
@@ -135,7 +151,7 @@ describe('VOIVOX desktop app', () => {
     fireEvent.click(screen.getByRole('button', { name: '在 Chrome 扩展中开始' }));
 
     expect(client.startCapture).not.toHaveBeenCalled();
-    expect(await screen.findByText('请在 Chrome 工具栏打开 VOIVOX，然后点击“转写当前标签页”。')).toBeTruthy();
+    expect(await screen.findByText('请在 Chrome 工具栏打开 Voice Vac，然后点击“转写当前标签页”。')).toBeTruthy();
   });
 
   it('polls for extension-imported sessions without clearing a visible ASR error', async () => {

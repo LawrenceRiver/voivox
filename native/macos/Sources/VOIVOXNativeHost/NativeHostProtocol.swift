@@ -86,7 +86,7 @@ enum NativeConnectionFile {
         return homeDirectory
             .appendingPathComponent("Library", isDirectory: true)
             .appendingPathComponent("Application Support", isDirectory: true)
-            .appendingPathComponent("VOIVOX", isDirectory: true)
+            .appendingPathComponent("Voice Vac", isDirectory: true)
             .appendingPathComponent("extension-connection.json", isDirectory: false)
     }
 

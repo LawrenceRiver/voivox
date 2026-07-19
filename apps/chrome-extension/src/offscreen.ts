@@ -19,6 +19,7 @@ let workletNode: AudioWorkletNode | undefined;
 let silentGain: GainNode | undefined;
 let sessionId: string | undefined;
 let tabTitle: string | undefined;
+let tabUrl: string | undefined;
 let route: ActiveRoute | undefined;
 let mode: TranscriptionMode = 'quality';
 let bridge: BridgeConfig | undefined;
@@ -92,6 +93,7 @@ async function startCapture(message: {
   route: unknown;
   streamId: string;
   tabTitle: string;
+  tabUrl?: string;
 }): Promise<{ sessionId: string }> {
   if (message.route !== 'browser-local') {
     throw new Error('Chrome 标签页只能在浏览器本地转写。');
@@ -106,6 +108,7 @@ async function startCapture(message: {
   mode = message.mode;
   bridge = message.bridge;
   tabTitle = message.tabTitle;
+  tabUrl = message.tabUrl;
   captureLimitReached = false;
   const generation = ++captureGeneration;
 
@@ -150,7 +153,8 @@ async function startCapture(message: {
       phase: 'capturing',
       route: 'browser-local',
       sessionId,
-      tabTitle: message.tabTitle
+      tabTitle: message.tabTitle,
+      ...(message.tabUrl ? { tabUrl: message.tabUrl } : {})
     };
     await saveCaptureState(started);
     return { sessionId };
@@ -160,6 +164,7 @@ async function startCapture(message: {
     sessionId = undefined;
     route = undefined;
     bridge = undefined;
+    tabUrl = undefined;
     throw error;
   }
 }
@@ -168,6 +173,7 @@ async function stopCapture(): Promise<CaptureState> {
   const currentRoute = route;
   const currentSessionId = sessionId;
   const currentTabTitle = tabTitle;
+  const currentTabUrl = tabUrl;
   captureGeneration += 1;
   await releaseAudioGraph();
 
@@ -191,7 +197,8 @@ async function stopCapture(): Promise<CaptureState> {
     phase: 'transcribing',
     route: 'browser-local',
     sessionId: currentSessionId,
-    tabTitle: currentTabTitle
+    tabTitle: currentTabTitle,
+    ...(currentTabUrl ? { tabUrl: currentTabUrl } : {})
   };
   if (capturedBrowserAudio.isSilent()) {
     const silentState: CaptureState = {
@@ -205,6 +212,7 @@ async function stopCapture(): Promise<CaptureState> {
     sessionId = undefined;
     route = undefined;
     bridge = undefined;
+    tabUrl = undefined;
     return silentState;
   }
 
@@ -272,6 +280,7 @@ async function runBrowserTranscription(): Promise<void> {
       bridge,
       durationSeconds,
       tabTitle: tabTitle ?? '当前 Chrome 标签页',
+      tabUrl,
       transcript: text
     };
     await saveCaptureState(completed);
@@ -421,7 +430,7 @@ function resetCaptureBuffers(): void {
 }
 
 function asError(error: unknown): Error {
-  return error instanceof Error ? error : new Error('VOIVOX 标签页收录失败。');
+  return error instanceof Error ? error : new Error('Voice Vac 标签页收录失败。');
 }
 
 function serializeCaptureOperation<T>(operation: () => Promise<T>): Promise<T> {

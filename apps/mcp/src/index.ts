@@ -6,7 +6,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
-import { VoivoxClient, type VoivoxConnection } from './voivox-client.js';
+import { VoivoxClient, VoivoxRequestError, type VoivoxConnection } from './voivox-client.js';
 
 export function createVoivoxMcpServer(voivox: VoivoxClient): McpServer {
   const server = new McpServer({ name: 'voivox', version: '0.1.1' });
@@ -14,18 +14,49 @@ export function createVoivoxMcpServer(voivox: VoivoxClient): McpServer {
   server.registerTool(
     'voivox_status',
     {
-      title: 'VOIVOX status',
-      description: 'Read the local VOIVOX desktop app status and its active capture, if any.',
+      title: 'Voice Vac status',
+      description: 'Read the local Voice Vac desktop app status and its active capture, if any.',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
     },
     () => toolResult(() => voivox.status())
   );
 
   server.registerTool(
+    'transcribe_active_video',
+    {
+      title: 'Transcribe active video',
+      description: 'Ask Voice Vac to transcribe the browser video the user has authorized, then return structured text directly to Codex.',
+      inputSchema: {
+        mode: z.enum(['auto', 'live', 'accelerated']).default('auto'),
+        language: z.string().min(1).default('auto'),
+        timestamps: z.boolean().default(false),
+        output_format: z.enum(['text', 'json', 'srt', 'vtt']).default('text')
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+    },
+    ({ mode, language, timestamps, output_format }) => toolResult(() => voivox.transcribeActiveVideo({
+      mode,
+      language,
+      timestamps,
+      output_format
+    }))
+  );
+
+  server.registerTool(
+    'get_latest_transcript',
+    {
+      title: 'Get latest Voice Vac transcript',
+      description: 'Read the most recent completed browser-video transcript from Voice Vac without starting another capture.',
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+    },
+    () => toolResult(() => voivox.getLatestTranscript())
+  );
+
+  server.registerTool(
     'voivox_list_sessions',
     {
-      title: 'List VOIVOX sessions',
-      description: 'List locally stored VOIVOX transcript sessions, newest first. This reads text metadata only.',
+      title: 'List Voice Vac sessions',
+      description: 'List locally stored Voice Vac transcript sessions, newest first. This reads text metadata only.',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
     },
     () => toolResult(() => voivox.listSessions())
@@ -35,7 +66,7 @@ export function createVoivoxMcpServer(voivox: VoivoxClient): McpServer {
     'voivox_list_macos_processes',
     {
       title: 'List selectable macOS audio processes',
-      description: 'List running macOS apps that can be explicitly selected for muted, local VOIVOX process capture.',
+      description: 'List running macOS apps that can be explicitly selected for muted, local Voice Vac process capture.',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
     },
     () => toolResult(() => voivox.listMacProcesses())
@@ -44,8 +75,8 @@ export function createVoivoxMcpServer(voivox: VoivoxClient): McpServer {
   server.registerTool(
     'voivox_get_transcript',
     {
-      title: 'Get VOIVOX transcript',
-      description: 'Read one local VOIVOX session, including immutable timestamped raw text and any derived text-only outputs.',
+      title: 'Get Voice Vac transcript',
+      description: 'Read one local Voice Vac session, including immutable timestamped raw text and any derived text-only outputs.',
       inputSchema: { session_id: z.string().min(1) },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
     },
@@ -55,7 +86,7 @@ export function createVoivoxMcpServer(voivox: VoivoxClient): McpServer {
   server.registerTool(
     'voivox_export_transcript',
     {
-      title: 'Export raw VOIVOX transcript',
+      title: 'Export raw Voice Vac transcript',
       description: 'Export the immutable raw transcript with timestamps as plain text. This does not call an external AI provider.',
       inputSchema: { session_id: z.string().min(1) },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
@@ -72,8 +103,8 @@ export function createVoivoxMcpServer(voivox: VoivoxClient): McpServer {
   server.registerTool(
     'voivox_start_capture',
     {
-      title: 'Start a VOIVOX capture',
-      description: 'Start muted capture for one explicitly selected macOS process in the running VOIVOX desktop app. Chrome tabs must be started from the Chrome extension, which requires a direct user click.',
+      title: 'Start a Voice Vac capture',
+      description: 'Start muted capture for one explicitly selected macOS process in the running Voice Vac desktop app. Chrome tabs must be started from the Chrome extension, which requires a direct user click.',
       inputSchema: {
         source_label: z.string().min(1).max(200),
         process_id: z.number().int().positive()
@@ -87,8 +118,8 @@ export function createVoivoxMcpServer(voivox: VoivoxClient): McpServer {
   server.registerTool(
     'voivox_stop_capture',
     {
-      title: 'Stop a VOIVOX capture',
-      description: 'Stop the specified local VOIVOX capture and preserve the recorded raw transcript locally.',
+      title: 'Stop a Voice Vac capture',
+      description: 'Stop the specified local Voice Vac capture and preserve the recorded raw transcript locally.',
       inputSchema: { session_id: z.string().min(1) },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
     },
@@ -98,7 +129,7 @@ export function createVoivoxMcpServer(voivox: VoivoxClient): McpServer {
   server.registerTool(
     'voivox_save_derived_text',
     {
-      title: 'Save derived VOIVOX text',
+      title: 'Save derived Voice Vac text',
       description: 'Store a text-only derivative produced by Codex or an approved text provider. The immutable raw transcript is never changed.',
       inputSchema: {
         session_id: z.string().min(1),
@@ -120,7 +151,7 @@ export async function loadVoivoxConnection(connectionFile = defaultConnectionFil
   try {
     parsed = JSON.parse(await readFile(connectionFile, 'utf8'));
   } catch {
-    throw new Error('VOIVOX desktop app is not ready. Open it once, then try Codex again.');
+    throw new Error('Voice Vac desktop app is not ready. Open it once, then try Codex again.');
   }
 
   return parseVoivoxConnection(parsed);
@@ -128,7 +159,7 @@ export async function loadVoivoxConnection(connectionFile = defaultConnectionFil
 
 export function parseVoivoxConnection(value: unknown): VoivoxConnection {
   const invalid = () => new Error(
-    'VOIVOX desktop connection file is invalid. Reopen the app to repair it.'
+    'Voice Vac desktop connection file is invalid. Reopen the app to repair it.'
   );
   if (!value || typeof value !== 'object') {
     throw invalid();
@@ -169,7 +200,7 @@ export function parseVoivoxConnection(value: unknown): VoivoxConnection {
 }
 
 export function defaultConnectionFile(): string {
-  return process.env.VOIVOX_CONNECTION_FILE ?? join(homedir(), 'Library', 'Application Support', 'VOIVOX', 'mcp-connection.json');
+  return process.env.VOIVOX_CONNECTION_FILE ?? join(homedir(), 'Library', 'Application Support', 'Voice Vac', 'mcp-connection.json');
 }
 
 async function toolResult(operation: () => Promise<unknown>) {
@@ -189,13 +220,16 @@ function isStructuredRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function toolError(error: unknown) {
+  const message = error instanceof Error ? error.message : 'Voice Vac request failed.';
+  const code = error instanceof VoivoxRequestError ? error.code : undefined;
   return {
     content: [
       {
         type: 'text' as const,
-        text: error instanceof Error ? error.message : 'VOIVOX request failed.'
+        text: code ? `[${code}] ${message}` : message
       }
     ],
+    ...(code ? { structuredContent: { error: { code, message } } } : {}),
     isError: true
   };
 }
@@ -208,7 +242,7 @@ async function main(): Promise<void> {
 
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
   void main().catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : 'VOIVOX MCP could not start.');
+    console.error(error instanceof Error ? error.message : 'Voice Vac MCP could not start.');
     process.exitCode = 1;
   });
 }

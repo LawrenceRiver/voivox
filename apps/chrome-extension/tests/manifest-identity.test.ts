@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 describe('Chrome extension identity', () => {
-  it('pins the public key that produces the stable VOIVOX extension origin', async () => {
+  it('pins the public key that produces the stable Voice Vac extension origin', async () => {
     const manifest = JSON.parse(
       await readFile(new URL('../public/manifest.json', import.meta.url), 'utf8')
     ) as { key?: unknown };

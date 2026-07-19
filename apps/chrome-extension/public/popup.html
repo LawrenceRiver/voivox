@@ -4,30 +4,47 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="popup.css" />
-    <title>VOIVOX</title>
+    <title>Voice Vac</title>
   </head>
   <body>
     <main class="popup-shell">
       <header class="brand-bar">
         <div class="brand-lockup">
           <img alt="" height="42" src="icon.png" width="42" />
-          <div><strong>VOIVOX</strong><span>LOCAL AUDIO NOTES</span></div>
+          <div><strong>Voice Vac</strong><span>LOCAL AUDIO NOTES</span></div>
         </div>
         <button aria-label="Switch language" class="language-button" id="language" type="button">EN</button>
       </header>
 
-      <section class="recorder-card" aria-labelledby="capture-heading">
-        <p class="status-line"><span aria-hidden="true" id="status-dot"></span><span id="state" role="status">正在检查…</span></p>
-        <h1 id="capture-heading">把这个标签页<br />变成文字</h1>
-        <p class="message" id="message" aria-live="polite"></p>
-
-        <div class="sound-ribbon" aria-hidden="true">
-          <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+      <section class="popup-machine" aria-labelledby="capture-heading">
+        <div class="popup-plaque"><span></span>PVTT<small>PRIVATE AUDIO</small></div>
+        <div class="popup-stage">
+          <div class="popup-intake">
+            <button class="popup-head" aria-label="连接到视频" type="button"><i></i><i></i><b></b></button>
+            <small>吸音头</small>
+          </div>
+          <div class="popup-hose" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="popup-control">
+            <button class="capture-button" id="capture" type="button" aria-label="转写当前标签页">▶</button>
+            <span class="popup-action-label">转写当前标签页</span>
+            <p class="status-line"><span aria-hidden="true" id="status-dot"></span><span id="state" role="status">正在检查…</span></p>
+          </div>
+          <div class="popup-hose popup-hose--out" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="popup-output">
+            <div class="popup-output-head">
+              <div><span class="popup-kicker">字幕输出舱</span><h1 id="capture-heading">把这个标签页变成文字</h1></div>
+              <span class="popup-mode-badge">自动</span>
+            </div>
+            <p class="message" id="message" aria-live="polite"></p>
+            <div class="progress-track" id="progress-track" hidden><span id="progress-bar"></span></div>
+            <div class="transcript-empty" id="transcript-empty">文字会从这里出现。</div>
+            <pre id="transcript" hidden></pre>
+            <div class="popup-output-actions">
+              <button class="text-button" id="copy" type="button" disabled>复制全文</button>
+              <button class="retry-button" id="retry" type="button" hidden>重试</button>
+            </div>
+          </div>
         </div>
-        <div class="progress-track" id="progress-track" hidden><span id="progress-bar"></span></div>
-
-        <button class="capture-button" id="capture" type="button">转写当前标签页</button>
-
         <fieldset class="mode-fieldset">
           <legend id="mode-label">本地模型</legend>
           <div class="mode-switch">
@@ -36,21 +53,7 @@
           </div>
           <p id="mode-hint"></p>
         </fieldset>
-
-        <div class="route-note">
-          <span aria-hidden="true">↳</span>
-          <p><strong id="route-label">浏览器本地模型</strong><small id="route-hint">不需要 App，也不需要 API。</small></p>
-        </div>
-      </section>
-
-      <section class="transcript-card" aria-labelledby="transcript-heading">
-        <div class="section-heading">
-          <h2 id="transcript-heading">原始转写</h2>
-          <button class="text-button" id="copy" type="button" disabled>复制文字</button>
-        </div>
-        <p class="transcript-empty" id="transcript-empty">开始收录后，文字会出现在这里。</p>
-        <pre id="transcript" hidden></pre>
-        <button class="retry-button" id="retry" type="button" hidden>重试</button>
+        <div class="route-note"><span aria-hidden="true"></span><p><strong id="route-label">浏览器本地模型</strong><small id="route-hint">不需要 App，也不需要 API。</small></p></div>
       </section>
 
       <footer>

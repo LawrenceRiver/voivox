@@ -18,7 +18,7 @@ describe('DesktopRuntime', () => {
         {
           id: started.id,
           status: 'complete',
-          rawSegments: [{ text: 'VOIVOX 已收到一段本机测试转写。' }]
+          rawSegments: [{ text: 'Voice Vac 已收到一段本机测试转写。' }]
         }
       ]
     });

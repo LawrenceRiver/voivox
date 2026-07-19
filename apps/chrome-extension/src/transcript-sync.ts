@@ -4,6 +4,7 @@ export type BrowserTranscriptSync = {
   bridge?: BridgeConfig;
   durationSeconds: number;
   tabTitle: string;
+  tabUrl?: string;
   transcript: string;
 };
 
@@ -24,7 +25,13 @@ export async function syncBrowserTranscriptToDesktop(
     const response = await request(`${input.bridge.baseUrl}/v1/extension/transcripts`, {
       body: JSON.stringify({
         durationMs,
-        source: { kind: 'chrome-tab', label: input.tabTitle.slice(0, 200) },
+        source: {
+          kind: 'chrome-tab',
+          label: input.tabTitle.slice(0, 200),
+          ...(input.tabUrl && /^https?:\/\//u.test(input.tabUrl)
+            ? { title: input.tabTitle.slice(0, 500), url: input.tabUrl.slice(0, 4_000) }
+            : {})
+        },
         transcript
       }),
       headers: {

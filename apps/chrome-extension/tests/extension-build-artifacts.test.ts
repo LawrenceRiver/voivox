@@ -29,7 +29,7 @@ describe('Chrome extension distribution build', () => {
       '../dist/asr-worker.js',
       '../dist/audio-worklet.js',
       '../dist/offscreen.js',
-      '../dist/VOIVOX_LICENSE.txt',
+      '../dist/VACVOX_LICENSE.txt',
       '../dist/THIRD_PARTY_NOTICES.md',
       '../dist/TRANSFORMERS_LICENSE.txt',
       '../dist/JINJA_LICENSE.txt',

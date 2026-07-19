@@ -1,7 +1,7 @@
 import Testing
 @testable import VOIVOXHost
 
-@Test("silent process tap is the default behavior used by VOIVOX")
+@Test("silent process tap is the default behavior used by Voice Vac")
 func silentProcessTapDoesNotKeepPlaybackAudible() {
     let configuration = ProcessTapConfiguration(pid: 42, mode: .silent)
     #expect(configuration.keepsPlaybackAudible == false)

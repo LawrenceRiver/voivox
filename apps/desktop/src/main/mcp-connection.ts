@@ -21,7 +21,7 @@ export async function removeMcpConnectionFileBestEffort(
 
 function defaultErrorReporter(error: unknown): void {
   console.warn(
-    'VOIVOX could not remove its stale MCP connection file:',
+    'Voice Vac could not remove its stale MCP connection file:',
     error instanceof Error ? error.message : 'Unknown removal failure.'
   );
 }

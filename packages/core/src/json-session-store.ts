@@ -14,7 +14,7 @@ export class JsonSessionStore implements SessionStore {
 
     const parsed: unknown = JSON.parse(readFileSync(this.filePath, 'utf8'));
     if (!Array.isArray(parsed)) {
-      throw new Error('VOIVOX session store is malformed.');
+      throw new Error('Voice Vac session store is malformed.');
     }
 
     return parsed as CaptureSession[];

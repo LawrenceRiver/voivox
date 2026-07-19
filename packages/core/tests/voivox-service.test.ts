@@ -80,13 +80,13 @@ describe('VoivoxService', () => {
     expect(service.getSession('does-not-exist')).toBeUndefined();
   });
 
-  it('allows exactly one active capture across every VOIVOX surface', () => {
+  it('allows exactly one active capture across every Voice Vac surface', () => {
     const service = new VoivoxService();
     const active = service.startCapture({ kind: 'chrome-tab', label: 'Current tab' });
 
     expect(service.getActiveSession()).toMatchObject({ id: active.id, status: 'capturing' });
     expect(() => service.startCapture({ kind: 'macos-process', label: 'Safari' })).toThrow(
-      'VOIVOX is already capturing another source.'
+      'Voice Vac is already capturing another source.'
     );
 
     service.stopCapture(active.id);
@@ -115,6 +115,20 @@ describe('VoivoxService', () => {
     });
     expect(service.getActiveSession()?.id).toBe(active.id);
     expect(service.listSessions().map((session) => session.id)).toEqual(['session_2', 'session_1']);
+  });
+
+  it('preserves accelerated processing mode for the structured MCP result', () => {
+    const service = new VoivoxService();
+    service.importCompletedCapture(
+      { kind: 'chrome-tab', label: 'Cached media', url: 'https://example.com/video.mp4' },
+      [{ startMs: 0, endMs: 1_000, text: '极速批量转写。' }],
+      'accelerated_batch'
+    );
+
+    expect(service.getLatestBrowserTranscript()).toMatchObject({
+      processing_mode: 'accelerated_batch',
+      source_url: 'https://example.com/video.mp4'
+    });
   });
 
   it('rejects an empty browser-local transcript import', () => {

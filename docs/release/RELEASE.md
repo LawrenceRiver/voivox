@@ -1,6 +1,6 @@
-# VOIVOX release runbook
+# Voice Vac release runbook
 
-VOIVOX currently ships as an ad-hoc-signed, non-notarized macOS arm64 App candidate, a standalone Chrome MV3 ZIP, and a Codex MCP launcher bundled inside the App. Ad-hoc signing seals the local bundle but does not establish an Apple-verified developer identity.
+Voice Vac currently ships as an ad-hoc-signed, non-notarized macOS arm64 App candidate, a standalone Chrome MV3 ZIP, and a Codex MCP launcher bundled inside the App. Ad-hoc signing seals the local bundle but does not establish an Apple-verified developer identity.
 
 ## Release gate
 
@@ -24,24 +24,24 @@ npm run package:zip --workspace=@voivox/chrome-extension
 
 Expected output:
 
-- `apps/desktop/release/VOIVOX-0.1.1-arm64.dmg`
-- `apps/desktop/release/VOIVOX-0.1.1-arm64.zip`
-- `apps/chrome-extension/release/VOIVOX-Chrome-Extension-0.1.1.zip`
+- `apps/desktop/release/Voice Vac-0.1.1-arm64.dmg`
+- `apps/desktop/release/Voice Vac-0.1.1-arm64.zip`
+- `apps/chrome-extension/release/VoiceVac-Chrome-Extension-0.1.1.zip`
 
 The App contains the selected-process native host, Native Messaging host, optional Python ASR worker, and a standalone Codex MCP bundle/launcher. Browser model weights are intentionally not embedded; Chrome downloads the selected pinned model on first use.
 
 ## Judge install
 
-1. Open the DMG (or unzip the App archive), drag/copy `VOIVOX.app` into `/Applications`, and open it there. Because the current candidate is not Developer ID signed or notarized, macOS may require right-clicking the App and choosing **Open** once. Installing at this exact path also makes the packaged MCP command below work unchanged.
+1. Open the DMG (or unzip the App archive), drag/copy `Voice Vac.app` into `/Applications`, and open it there. Because the current candidate is not Developer ID signed or notarized, macOS may require right-clicking the App and choosing **Open** once. Installing at this exact path also makes the packaged MCP command below work unchanged.
 2. Unzip the Chrome artifact, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select the unzipped folder.
-3. Pin VOIVOX. Open a playing media tab, click VOIVOX, and click the main capture button. Tab audio is always transcribed inside the extension. The App is optional; when open, it receives only the completed text automatically.
+3. Pin Voice Vac. Open a playing media tab, click Voice Vac, and click the main capture button. Tab audio is always transcribed inside the extension. The App is optional; when open, it receives only the completed text automatically.
 4. Add the packaged MCP without installing Node:
 
    ```bash
-   codex mcp add voivox -- /Applications/VOIVOX.app/Contents/Resources/voivox/voivox-mcp
+   codex mcp add voivox -- /Applications/Voice Vac.app/Contents/Resources/voivox/voivox-mcp
    ```
 
-5. Open VOIVOX before asking Codex to call `voivox_status` or read sessions.
+5. Open Voice Vac before asking Codex to call `voivox_status` or read sessions.
 
 ## Signing and notarization before a general public release
 
@@ -50,8 +50,8 @@ The repository does not contain Apple credentials. A maintainer with an Apple De
 Recommended checks:
 
 ```bash
-codesign --verify --deep --strict --verbose=2 /Applications/VOIVOX.app
-spctl --assess --type execute --verbose=4 /Applications/VOIVOX.app
+codesign --verify --deep --strict --verbose=2 /Applications/Voice Vac.app
+spctl --assess --type execute --verbose=4 /Applications/Voice Vac.app
 ```
 
 ## GitHub release

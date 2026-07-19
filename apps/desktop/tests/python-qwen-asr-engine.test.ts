@@ -37,7 +37,7 @@ describe('PythonQwenAsrEngine', () => {
         new Promise<string>((resolve) => setTimeout(() => resolve('still pending'), 250))
       ]);
 
-      expect(outcome).toBe('VOIVOX local ASR timed out after 25 ms.');
+      expect(outcome).toBe('Voice Vac local ASR timed out after 25 ms.');
     } finally {
       await engine.close();
     }
@@ -60,7 +60,7 @@ describe('PythonQwenAsrEngine', () => {
       new Promise<string>((resolve) => setTimeout(() => resolve('still pending'), 100))
     ]);
 
-    expect(outcome).toBe('VOIVOX local ASR stopped.');
+    expect(outcome).toBe('Voice Vac local ASR stopped.');
     await closing;
   });
 
@@ -94,7 +94,7 @@ describe('PythonQwenAsrEngine', () => {
     });
 
     try {
-      await expect(transcription).rejects.toThrow('VOIVOX local ASR timed out after 300 ms.');
+      await expect(transcription).rejects.toThrow('Voice Vac local ASR timed out after 300 ms.');
       const signal = await Promise.race([
         exited,
         new Promise<'still running'>((resolve) => setTimeout(() => resolve('still running'), 250))
@@ -128,7 +128,7 @@ describe('PythonQwenAsrEngine', () => {
       const closing = Promise.resolve(engine.close()).then(() => {
         closeResolved = true;
       });
-      await expect(transcription).rejects.toThrow('VOIVOX local ASR stopped.');
+      await expect(transcription).rejects.toThrow('Voice Vac local ASR stopped.');
       await Promise.resolve();
       expect(closeResolved).toBe(false);
       await expect(exited).resolves.toBe('SIGKILL');
@@ -153,7 +153,7 @@ describe('PythonQwenAsrEngine', () => {
     await new Promise<void>((resolve) => child.stdout.once('data', resolve));
 
     try {
-      await expect(transcription).rejects.toThrow('VOIVOX local ASR timed out after 300 ms.');
+      await expect(transcription).rejects.toThrow('Voice Vac local ASR timed out after 300 ms.');
       const closeOutcome = await Promise.race([
         Promise.resolve(engine.close()).then(() => 'closed'),
         new Promise<'waiting'>((resolve) => setTimeout(() => resolve('waiting'), 25))
@@ -182,7 +182,7 @@ describe('PythonQwenAsrEngine', () => {
     const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
 
     const closing = engine.close();
-    await expect(transcription).rejects.toThrow('VOIVOX local ASR stopped.');
+    await expect(transcription).rejects.toThrow('Voice Vac local ASR stopped.');
     await exited;
     await closing;
     await new Promise((resolve) => setTimeout(resolve, 75));
@@ -207,7 +207,7 @@ describe('PythonQwenAsrEngine', () => {
       Promise.resolve(engine.close()).then(() => 'closed'),
       new Promise<'still waiting'>((resolve) => setTimeout(() => resolve('still waiting'), 250))
     ]);
-    await expect(transcriptionError).resolves.toMatchObject({ message: 'VOIVOX local ASR stopped.' });
+    await expect(transcriptionError).resolves.toMatchObject({ message: 'Voice Vac local ASR stopped.' });
 
     expect(outcome).toBe('closed');
     expect(kill).toHaveBeenCalledWith('SIGKILL');

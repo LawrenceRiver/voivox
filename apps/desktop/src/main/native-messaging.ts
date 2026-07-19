@@ -72,12 +72,12 @@ export async function installNativeMessagingHost(options: {
   writeManifest?: (manifestPath: string, manifest: unknown) => Promise<void>;
 }): Promise<NativeMessagingHostInstallation> {
   if (!isAbsolute(options.executablePath)) {
-    throw new Error('The VOIVOX native messaging host path must be absolute.');
+    throw new Error('The Voice Vac native messaging host path must be absolute.');
   }
 
   const manifest = {
     allowed_origins: [VOIVOX_EXTENSION_ORIGIN],
-    description: 'VOIVOX local desktop discovery bridge',
+    description: 'Voice Vac local desktop discovery bridge',
     name: NATIVE_MESSAGING_HOST_NAME,
     path: options.executablePath,
     type: 'stdio'

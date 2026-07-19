@@ -4,8 +4,8 @@
   "version": "0.1.1",
   "type": "module",
   "scripts": {
-    "build": "esbuild src/popup.ts src/service-worker.ts src/offscreen.ts src/audio-worklet.ts src/asr-worker.ts --bundle --format=esm --target=chrome116 --outdir=dist && cp public/manifest.json public/popup.html public/popup.css public/offscreen.html public/icon.png ../../THIRD_PARTY_NOTICES.md dist/ && cp ../../LICENSE dist/VOIVOX_LICENSE.txt && cp ../../node_modules/@huggingface/transformers/LICENSE dist/TRANSFORMERS_LICENSE.txt && cp ../../node_modules/@huggingface/jinja/LICENSE dist/JINJA_LICENSE.txt && cp ../../licenses/onnxruntime-MIT.txt dist/ONNXRUNTIME_LICENSE.txt && mkdir -p dist/wasm && cp ../../node_modules/@huggingface/transformers/dist/ort-wasm-simd-threaded.jsep.mjs ../../node_modules/@huggingface/transformers/dist/ort-wasm-simd-threaded.jsep.wasm dist/wasm/",
-    "package:zip": "npm run build && mkdir -p release && rm -f release/VOIVOX-Chrome-Extension-0.1.1.zip && (cd dist && zip -qr ../release/VOIVOX-Chrome-Extension-0.1.1.zip .)",
+    "build": "esbuild src/popup.ts src/service-worker.ts src/offscreen.ts src/audio-worklet.ts src/asr-worker.ts src/content-tunnel.ts --bundle --format=esm --target=chrome116 --outdir=dist && cp public/manifest.json public/popup.html public/popup.css public/offscreen.html public/content-tunnel.css public/icon.png ../../THIRD_PARTY_NOTICES.md dist/ && cp ../../LICENSE dist/VACVOX_LICENSE.txt && cp ../../node_modules/@huggingface/transformers/LICENSE dist/TRANSFORMERS_LICENSE.txt && cp ../../node_modules/@huggingface/jinja/LICENSE dist/JINJA_LICENSE.txt && cp ../../licenses/onnxruntime-MIT.txt dist/ONNXRUNTIME_LICENSE.txt && mkdir -p dist/wasm && cp ../../node_modules/@huggingface/transformers/dist/ort-wasm-simd-threaded.jsep.mjs ../../node_modules/@huggingface/transformers/dist/ort-wasm-simd-threaded.jsep.wasm dist/wasm/",
+    "package:zip": "npm run build && mkdir -p release && rm -f release/VoiceVac-Chrome-Extension-0.1.1.zip && (cd dist && zip -qr ../release/VoiceVac-Chrome-Extension-0.1.1.zip .)",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

@@ -164,13 +164,13 @@ export function buildEvidence({
     limitations: [
       'This is one real-path smoke test, not a word-error-rate benchmark.',
       'The selected source is a music mix; vocals and instrumental backing can reduce speech-recognition accuracy.',
-      `The Node verification harness uses the same pinned q8 model as VOIVOX ${mode} mode, but it does not replace an in-browser extension UI test.`
+      `The Node verification harness uses the same pinned q8 model as Voice Vac ${mode} mode, but it does not replace an in-browser extension UI test.`
     ]
   };
 }
 
 export function formatEvidenceMarkdown(evidence) {
-  return `# VOIVOX local-ASR smoke-test evidence
+  return `# Voice Vac local-ASR smoke-test evidence
 
 - Source: [${evidence.source.title}](${evidence.source.url})
 - Segment: ${evidence.segment.startSeconds}s–${evidence.segment.startSeconds + evidence.segment.durationSeconds}s (${evidence.segment.durationSeconds}s)
@@ -190,7 +190,7 @@ export function formatEvidenceMarkdown(evidence) {
 
 ## Scope and limitations
 
-This is a reproducible end-to-end smoke test, not an accuracy score. The source is a music mix, so backing instrumentation and sung vocals may reduce recognition quality. The harness verifies local inference with the same pinned q8 model used by VOIVOX ${evidence.model.mode} mode; it does not substitute for the separate Chrome-extension UI test.
+This is a reproducible end-to-end smoke test, not an accuracy score. The source is a music mix, so backing instrumentation and sung vocals may reduce recognition quality. The harness verifies local inference with the same pinned q8 model used by Voice Vac ${evidence.model.mode} mode; it does not substitute for the separate Chrome-extension UI test.
 
 - Input SHA-256: \`${evidence.source.inputSha256}\`
 - Extracted-audio SHA-256: \`${evidence.audio.sha256}\`

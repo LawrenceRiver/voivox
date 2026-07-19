@@ -1,4 +1,4 @@
-# VOIVOX local-ASR smoke-test evidence
+# Voice Vac local-ASR smoke-test evidence
 
 - Source: [大学生勇闯音乐圈：Abuse 正式 M/V 上线](https://www.xiaohongshu.com/explore/699ee564000000001b01624a)
 - Segment: 0s–30s (30s)
@@ -18,7 +18,7 @@
 
 ## Scope and limitations
 
-This is a reproducible end-to-end smoke test, not an accuracy score. The source is a music mix, so backing instrumentation and sung vocals may reduce recognition quality. The harness verifies local inference with the same pinned q8 model used by VOIVOX fast mode; it does not substitute for the separate Chrome-extension UI test.
+This is a reproducible end-to-end smoke test, not an accuracy score. The source is a music mix, so backing instrumentation and sung vocals may reduce recognition quality. The harness verifies local inference with the same pinned q8 model used by Voice Vac fast mode; it does not substitute for the separate Chrome-extension UI test.
 
 - Input SHA-256: `2249cab0ec403f7afe63ce1078da3eb26873bad048c56113e51ed9f9c450fd10`
 - Extracted-audio SHA-256: `b92facb256c6bdac8337f3bd585a5322f1488dd1d18f52a836c39f4a6bcf0ea9`

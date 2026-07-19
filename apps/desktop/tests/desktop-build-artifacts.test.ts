@@ -43,7 +43,7 @@ describe('desktop distribution build', () => {
     expect(rendererHtml).toContain('href="./assets/');
     expect(preload).not.toMatch(/^import\s/m);
     expect(mcpLauncher).toContain('ELECTRON_RUN_AS_NODE=1');
-    expect(mcpBundle).toContain('VOIVOX status');
+    expect(mcpBundle).toContain('Voice Vac status');
     expect(mcpLauncherStat.mode & 0o111).not.toBe(0);
     expect(mcpLicense).toContain('Anthropic, PBC');
     expect(zodLicense).toContain('Colin McDonnell');
@@ -52,7 +52,7 @@ describe('desktop distribution build', () => {
     expect(electronChromiumNotices).toContain('Chromium software is made available as source code');
 
     const requiredLicenses = [
-      'VOIVOX_LICENSE.txt',
+      'VACVOX_LICENSE.txt',
       'AJV_LICENSE.txt',
       'AJV_FORMATS_LICENSE.txt',
       'FAST_DEEP_EQUAL_LICENSE.txt',

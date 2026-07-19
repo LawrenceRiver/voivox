@@ -17,14 +17,14 @@ export function ChromeBridgePanel({
 
   async function revealBridge(): Promise<void> {
     if (!getBridge) {
-      setError('桌面桥接暂不可用。请重新打开 VOIVOX。');
+      setError('桌面桥接暂不可用。请重新打开 Voice Vac。');
       return;
     }
     try {
       setBridge(await getBridge());
       setError(undefined);
     } catch {
-      setError('无法生成 Chrome 桥接信息。请重新打开 VOIVOX。');
+      setError('无法生成 Chrome 桥接信息。请重新打开 Voice Vac。');
     }
   }
 

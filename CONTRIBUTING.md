@@ -1,11 +1,11 @@
-# Contributing to VOIVOX
+# Contributing to Voice Vac
 
-VOIVOX has three deployable surfaces: the macOS desktop App, its local Codex MCP wrapper, and a Chrome extension. Keep changes local-first and explicit about which surface receives source audio.
+Voice Vac has three deployable surfaces: the macOS desktop App, its local Codex MCP wrapper, and a Chrome extension. Keep changes local-first and explicit about which surface receives source audio.
 
 ## Before opening a pull request
 
 1. Run `npm test`, `npm run typecheck`, `npm run build`, and `(cd native/macos && swift test)`.
-2. Do not commit downloaded ASR models, `node_modules`, `dist`, `release`, `.build`, tokens, recordings, or `~/Library/Application Support/VOIVOX` data.
+2. Do not commit downloaded ASR models, `node_modules`, `dist`, `release`, `.build`, tokens, recordings, or `~/Library/Application Support/Voice Vac` data.
 3. Preserve the raw-transcript rule: transforms are saved as a new derived result and never replace timestamped raw text.
 4. Treat capture starts/stops and any external-provider call as explicit user actions. Do not add hidden background capture, clipboard interception, or input-method hooks.
 5. Do not add remotely hosted executable code to the MV3 extension. Models may be downloaded as pinned data; JavaScript, AudioWorklets, WASM glue, and workers must ship in the extension archive.

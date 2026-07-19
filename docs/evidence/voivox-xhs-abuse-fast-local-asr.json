@@ -42,6 +42,6 @@
   "limitations": [
     "This is one real-path smoke test, not a word-error-rate benchmark.",
     "The selected source is a music mix; vocals and instrumental backing can reduce speech-recognition accuracy.",
-    "The Node verification harness uses the same pinned q8 model as VOIVOX fast mode, but it does not replace an in-browser extension UI test."
+    "The Node verification harness uses the same pinned q8 model as Voice Vac fast mode, but it does not replace an in-browser extension UI test."
   ]
 }

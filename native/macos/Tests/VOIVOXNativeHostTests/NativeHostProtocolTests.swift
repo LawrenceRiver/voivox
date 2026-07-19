@@ -3,7 +3,7 @@ import CryptoKit
 import Testing
 @testable import VOIVOXNativeHost
 
-@Suite("VOIVOX native discovery protocol")
+@Suite("Voice Vac native discovery protocol")
 struct NativeHostProtocolTests {
     @Test("uses the Chrome manifest host identity")
     func usesStableHostIdentity() {
@@ -217,7 +217,7 @@ struct NativeHostProtocolTests {
 
         #expect(
             NativeConnectionFile.path(environment: [:], homeDirectory: home).path
-                == "/Users/tester/Library/Application Support/VOIVOX/extension-connection.json"
+                == "/Users/tester/Library/Application Support/Voice Vac/extension-connection.json"
         )
         #expect(
             NativeConnectionFile.path(

@@ -24,7 +24,7 @@ export async function discoverNativeDesktop({
     const response = await Promise.race([
       sendMessage(VOIVOX_NATIVE_HOST, { protocolVersion: 1, type: 'discover' }),
       new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(() => reject(new Error('VOIVOX native host timed out.')), timeoutMs);
+        timeout = setTimeout(() => reject(new Error('Voice Vac native host timed out.')), timeoutMs);
       })
     ]);
     const connection = parseNativeConnection(response);

@@ -7,8 +7,8 @@ This is a user-visible acceptance run of the unpacked extension in the user's no
 ## Path exercised
 
 1. Played Lawrence River's public Xiaohongshu music-video post.
-2. Opened VOIVOX from Chrome's Extensions menu and selected **Quality**.
-3. Started tab capture, leaving the browser tab's media track enabled while VOIVOX routed playback into a zero-gain audio graph.
+2. Opened Voice Vac from Chrome's Extensions menu and selected **Quality**.
+3. Started tab capture, leaving the browser tab's media track enabled while Voice Vac routed playback into a zero-gain audio graph.
 4. Captured a short live segment and selected **Stop and transcribe**.
 5. Loaded the pinned `onnx-community/whisper-base` q8 model from the browser cache and ran inference with bundled ONNX Runtime WASM.
 6. Observed the completed raw transcript in the popup and captured [the result screenshot](../assets/voivox-live-tab-transcription.jpg).
@@ -27,4 +27,4 @@ The final noisy 20-second music-video segment completed with finite, readable ra
 
 > (laughing) I'm not sure if it's too long or too stop where I am about. You can do that expression again. This is so painful.
 
-This proves the real capture-to-text path and guards against the original crash, deadlock, and runaway repetition. It is not a word-error-rate benchmark: music, laughter, edits, and mixed-language speech are intentionally difficult for an approximately 80 MB Whisper base q8 model. VOIVOX preserves raw model output so a later Codex/LLM step can clean or summarize it without overwriting the source.
+This proves the real capture-to-text path and guards against the original crash, deadlock, and runaway repetition. It is not a word-error-rate benchmark: music, laughter, edits, and mixed-language speech are intentionally difficult for an approximately 80 MB Whisper base q8 model. Voice Vac preserves raw model output so a later Codex/LLM step can clean or summarize it without overwriting the source.

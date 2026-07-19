@@ -80,7 +80,7 @@ describe('extension connection publisher', () => {
 describe('Chrome native messaging host installation', () => {
   it('atomically installs exact-origin manifests with an absolute bundled executable path', async () => {
     const homeDirectory = await temporaryDirectory();
-    const executablePath = join(homeDirectory, 'VOIVOX.app', 'Contents', 'Resources', 'voivox', 'voivox-native-host');
+    const executablePath = join(homeDirectory, 'Voice Vac.app', 'Contents', 'Resources', 'voivox', 'voivox-native-host');
 
     const installation = await installNativeMessagingHost({ executablePath, homeDirectory });
     const manifestPaths = installation.installed;
@@ -93,7 +93,7 @@ describe('Chrome native messaging host installation', () => {
     for (const manifestPath of manifestPaths) {
       expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toEqual({
         allowed_origins: [VOIVOX_EXTENSION_ORIGIN],
-        description: 'VOIVOX local desktop discovery bridge',
+        description: 'Voice Vac local desktop discovery bridge',
         name: NATIVE_MESSAGING_HOST_NAME,
         path: executablePath,
         type: 'stdio'

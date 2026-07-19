@@ -14,6 +14,7 @@ describe('browser transcript desktop sync', () => {
       bridge: { baseUrl: 'http://127.0.0.1:43817', token: 'restricted-token' },
       durationSeconds: 12.501,
       tabTitle: 'My MV',
+      tabUrl: 'https://example.com/watch/123',
       transcript: '  本地转写文字。  '
     }, request)).resolves.toBe(true);
 
@@ -28,7 +29,12 @@ describe('browser transcript desktop sync', () => {
     });
     expect(JSON.parse(options.body as string)).toEqual({
       durationMs: 12_501,
-      source: { kind: 'chrome-tab', label: 'My MV' },
+      source: {
+        kind: 'chrome-tab',
+        label: 'My MV',
+        title: 'My MV',
+        url: 'https://example.com/watch/123'
+      },
       transcript: '本地转写文字。'
     });
     expect(options.body).not.toContain('audio');

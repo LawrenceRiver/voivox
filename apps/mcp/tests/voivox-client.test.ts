@@ -294,7 +294,7 @@ describe('VoivoxClient', () => {
       new Promise<string>((resolve) => setTimeout(() => resolve('still pending'), 250))
     ]);
 
-    expect(outcome).toBe('VOIVOX desktop app did not respond within 25 ms.');
+    expect(outcome).toBe('Voice Vac desktop app did not respond within 25 ms.');
   });
 });
 
@@ -370,11 +370,11 @@ describe('parseVoivoxConnection', () => {
       'http://example.com:43817'
     ]) {
       expect(() => parseVoivoxConnection({ baseUrl, token: 'desktop-only-token' }))
-        .toThrow('VOIVOX desktop connection file is invalid');
+        .toThrow('Voice Vac desktop connection file is invalid');
     }
     expect(() => parseVoivoxConnection({
       baseUrl: 'http://127.0.0.1:43817',
       token: ''
-    })).toThrow('VOIVOX desktop connection file is invalid');
+    })).toThrow('Voice Vac desktop connection file is invalid');
   });
 });

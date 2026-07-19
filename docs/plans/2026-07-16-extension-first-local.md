@@ -1,8 +1,8 @@
-# VOIVOX extension-first local release plan
+# Voice Vac extension-first local release plan
 
 ## Product contract
 
-VOIVOX ships as three surfaces over one local-first transcript format:
+Voice Vac ships as three surfaces over one local-first transcript format:
 
 1. A Chrome extension that can capture the active tab silently and transcribe it without an API key or a desktop dependency.
 2. An optional macOS desktop app that offers a session library, Codex MCP, and a separate experimental selected-App ASR feature.
@@ -33,7 +33,7 @@ The product is bilingual (`zh-CN` and `en`), defaults to the system language, pe
 2. Typed bilingual catalog with locale persistence.
 3. Fixed-port discovery, exact-origin CORS, and restricted bootstrap token.
 4. Browser-local model selection, download progress, capture lifecycle, retry, and transcript export.
-5. Simplified bilingual desktop and popup UI with visible VOIVOX branding.
+5. Simplified bilingual desktop and popup UI with visible Voice Vac branding.
 6. MCP raw/derived transcript workflow and a reproducible demo fixture.
 7. Build, typecheck, unit/integration tests, unpacked-extension browser test, packaged-app smoke test, README screenshots, and GitHub release handoff.
 

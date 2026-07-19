@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980" role="img" aria-labelledby="title desc">
+  <title id="title">Voice Vac Private Video Transcription Tunnel architecture</title>
+  <desc id="desc">A three-surface architecture diagram showing a Chrome tab flowing through a private D Channel to local speech recognition and then to the Voice Vac App, MCP Monitor, and Codex.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f5fbf8"/>
+      <stop offset="1" stop-color="#e4f2ee"/>
+    </linearGradient>
+    <linearGradient id="pipe" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#77b9ac"/>
+      <stop offset="1" stop-color="#176f67"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#194740" flood-opacity=".14"/>
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0 0 L12 6 L0 12 Z" fill="#176f67"/>
+    </marker>
+    <style>
+      .title { font: 700 34px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #123e3b; }
+      .subtitle { font: 500 17px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #55736f; }
+      .label { font: 700 18px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #123e3b; }
+      .body { font: 500 15px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #476663; }
+      .small { font: 600 13px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #55736f; letter-spacing: .4px; }
+      .status { font: 800 12px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 1px; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="980" rx="36" fill="url(#bg)"/>
+  <circle cx="1450" cy="110" r="170" fill="#d4ebe4" opacity=".55"/>
+  <circle cx="140" cy="860" r="150" fill="#f9ddad" opacity=".28"/>
+
+  <text x="84" y="82" class="title">Voice Vac</text>
+  <text x="84" y="116" class="subtitle">Private Video Transcription Tunnel · one source in, useful text out</text>
+  <rect x="1260" y="61" width="250" height="42" rx="21" fill="#176f67"/>
+  <text x="1385" y="88" text-anchor="middle" class="status" fill="#fff">CURRENT STAGE · MVP + PVTT</text>
+
+  <!-- Source -->
+  <g filter="url(#shadow)">
+    <rect x="84" y="190" width="300" height="218" rx="26" fill="#fff" stroke="#b8d9d0" stroke-width="2"/>
+    <rect x="112" y="220" width="64" height="64" rx="18" fill="#f8ead1"/>
+    <circle cx="132" cy="247" r="7" fill="#f19d51"/><circle cx="155" cy="247" r="7" fill="#176f67"/>
+    <path d="M128 271 Q143 287 159 271" fill="none" stroke="#176f67" stroke-width="4" stroke-linecap="round"/>
+    <text x="200" y="249" class="label">Chrome Extension</text>
+    <text x="200" y="277" class="body">当前可播放的视频标签页</text>
+    <text x="112" y="333" class="small">USER-AUTHORIZED TAB CAPTURE</text>
+    <text x="112" y="360" class="body">• 吸音头拖到视频区域</text>
+    <text x="112" y="385" class="body">• tabCapture · 只取目标标签页</text>
+  </g>
+  <rect x="100" y="424" width="268" height="30" rx="15" fill="#dff1ea"/>
+  <text x="234" y="445" text-anchor="middle" class="status" fill="#176f67">COMPLETE · UI + BRIDGE</text>
+
+  <!-- pipe -->
+  <path d="M390 299 C455 299 455 299 515 299" fill="none" stroke="#b7d5cd" stroke-width="30" stroke-linecap="round"/>
+  <path d="M390 299 C455 299 455 299 515 299" fill="none" stroke="url(#pipe)" stroke-width="11" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <text x="453" y="264" text-anchor="middle" class="small">D CHANNEL</text>
+  <text x="453" y="350" text-anchor="middle" class="body">静音目标标签页</text>
+
+  <!-- D Channel -->
+  <g filter="url(#shadow)">
+    <rect x="515" y="165" width="360" height="270" rx="30" fill="#eef8f4" stroke="#8bc6b9" stroke-width="2"/>
+    <circle cx="585" cy="235" r="42" fill="#f8ead1" stroke="#e1bd86" stroke-width="3"/>
+    <circle cx="574" cy="228" r="7" fill="#123e3b"/><circle cx="597" cy="228" r="7" fill="#123e3b"/>
+    <path d="M568 250 Q585 265 603 250" fill="none" stroke="#176f67" stroke-width="4" stroke-linecap="round"/>
+    <text x="655" y="229" class="label">Private Audio Tunnel</text>
+    <text x="655" y="256" class="body">PCM 16 kHz · mono · local only</text>
+    <text x="560" y="331" class="small">AUTOMATIC MODE ROUTER</text>
+    <rect x="560" y="350" width="133" height="48" rx="16" fill="#d7eee7"/>
+    <text x="626" y="380" text-anchor="middle" class="label" font-size="15">Live Tunnel</text>
+    <rect x="711" y="350" width="133" height="48" rx="16" fill="#f9e7c9"/>
+    <text x="777" y="380" text-anchor="middle" class="label" font-size="15">Accelerated</text>
+  </g>
+  <rect x="545" y="451" width="300" height="30" rx="15" fill="#e2f0ec"/>
+  <text x="695" y="472" text-anchor="middle" class="status" fill="#176f67">IMPLEMENTED · LEGAL SOURCE BOUNDARY</text>
+
+  <!-- ASR -->
+  <path d="M881 299 C925 299 925 299 970 299" fill="none" stroke="#b7d5cd" stroke-width="30" stroke-linecap="round"/>
+  <path d="M881 299 C925 299 925 299 970 299" fill="none" stroke="url(#pipe)" stroke-width="11" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <g filter="url(#shadow)">
+    <rect x="970" y="190" width="290" height="218" rx="26" fill="#fff" stroke="#b8d9d0" stroke-width="2"/>
+    <rect x="1000" y="220" width="64" height="64" rx="18" fill="#dff1ea"/>
+    <path d="M1032 232 v28 M1020 246 h24 M1026 270 h14" fill="none" stroke="#176f67" stroke-width="5" stroke-linecap="round"/>
+    <text x="1090" y="249" class="label">Local ASR</text>
+    <text x="1090" y="277" class="body">Qwen3-ASR / Whisper</text>
+    <text x="1000" y="333" class="small">PROVIDER INTERFACE</text>
+    <text x="1000" y="360" class="body">• stream → incremental text</text>
+    <text x="1000" y="385" class="body">• batch → ordered chunks</text>
+  </g>
+  <rect x="984" y="424" width="262" height="30" rx="15" fill="#dff1ea"/>
+  <text x="1115" y="445" text-anchor="middle" class="status" fill="#176f67">COMPLETE · NO API KEY</text>
+
+  <!-- transcript store -->
+  <path d="M1264 299 C1310 299 1310 299 1350 299" fill="none" stroke="#b7d5cd" stroke-width="30" stroke-linecap="round"/>
+  <path d="M1264 299 C1310 299 1310 299 1350 299" fill="none" stroke="url(#pipe)" stroke-width="11" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <g filter="url(#shadow)">
+    <rect x="1350" y="190" width="166" height="218" rx="26" fill="#fff" stroke="#b8d9d0" stroke-width="2"/>
+    <rect x="1383" y="225" width="100" height="60" rx="14" fill="#f8ead1"/>
+    <path d="M1403 244 h60 M1403 259 h60 M1403 274 h43" stroke="#176f67" stroke-width="5" stroke-linecap="round"/>
+    <text x="1433" y="330" text-anchor="middle" class="label" font-size="16">Transcript</text>
+    <text x="1433" y="357" text-anchor="middle" class="body">PVTT contract</text>
+    <text x="1433" y="382" text-anchor="middle" class="body">text · segments · URL</text>
+  </g>
+  <rect x="1355" y="424" width="156" height="30" rx="15" fill="#dff1ea"/>
+  <text x="1433" y="445" text-anchor="middle" class="status" fill="#176f67">COMPLETE</text>
+
+  <!-- outputs -->
+  <path d="M1433 470 V560" fill="none" stroke="#176f67" stroke-width="8" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <text x="1433" y="522" text-anchor="middle" class="small">STRUCTURED OUTPUT</text>
+
+  <g filter="url(#shadow)">
+    <rect x="86" y="580" width="440" height="238" rx="28" fill="#fff" stroke="#b8d9d0" stroke-width="2"/>
+    <circle cx="132" cy="635" r="24" fill="#dff1ea"/><path d="M121 635 h22 M132 624 v22" stroke="#176f67" stroke-width="5" stroke-linecap="round"/>
+    <text x="174" y="642" class="label">Voice Vac App</text>
+    <text x="116" y="692" class="body">完整机器界面 · 全文字幕舱 · 自动／实时／极速</text>
+    <text x="116" y="723" class="body">复制全文 · 清空 · 重新转录 · 中英切换</text>
+    <rect x="116" y="755" width="172" height="33" rx="16" fill="#dff1ea"/>
+    <text x="202" y="777" text-anchor="middle" class="status" fill="#176f67">UI VALIDATED · COMPUTER USE</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="574" y="580" width="440" height="238" rx="28" fill="#fff" stroke="#b8d9d0" stroke-width="2"/>
+    <circle cx="620" cy="635" r="24" fill="#f9e7c9"/><path d="M609 635 h22 M620 624 v22" stroke="#c77a28" stroke-width="5" stroke-linecap="round"/>
+    <text x="662" y="642" class="label">MCP Monitor → Codex</text>
+    <text x="604" y="692" class="body">等待调用 → 连接 → 转录 → 返回 → 完成／失败</text>
+    <text x="604" y="723" class="body">直接返回 transcript，不经过剪贴板</text>
+    <rect x="604" y="755" width="154" height="33" rx="16" fill="#dff1ea"/>
+    <text x="681" y="777" text-anchor="middle" class="status" fill="#176f67">TOOLS + ERRORS READY</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1062" y="580" width="454" height="238" rx="28" fill="#fff" stroke="#e4c793" stroke-width="2"/>
+    <circle cx="1108" cy="635" r="24" fill="#f8ead1"/><path d="M1096 640 q12 -22 24 0" fill="none" stroke="#c77a28" stroke-width="5" stroke-linecap="round"/>
+    <text x="1150" y="642" class="label">Stage &amp; Validation</text>
+    <text x="1092" y="692" class="body">MVP Live Tunnel：已实现并测试</text>
+    <text x="1092" y="723" class="body">Accelerated Decode：边界与回退已实现</text>
+    <text x="1092" y="754" class="body">Chrome 音频隔离：需真实用户设备手测</text>
+    <rect x="1092" y="775" width="200" height="30" rx="15" fill="#fff2dc"/>
+    <text x="1192" y="795" text-anchor="middle" class="status" fill="#b7661f">MANUAL GATE REMAINS</text>
+  </g>
+
+  <rect x="86" y="870" width="1430" height="62" rx="22" fill="#123e3b"/>
+  <text x="116" y="907" class="body" fill="#e5f4ef">隐私边界：</text>
+  <text x="220" y="907" class="body" fill="#e5f4ef">不占用麦克风 · 不改变系统扬声器 · 不录入其他标签页 · 不绕过 DRM · 音频默认不长期保存</text>
+</svg>

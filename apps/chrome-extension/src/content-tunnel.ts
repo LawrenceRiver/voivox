@@ -77,9 +77,11 @@ export function mountContentTunnel(): MountedContentTunnel {
   function targetPayload(video: HTMLVideoElement | undefined): Record<string, unknown> {
     if (!video) return {};
     const rect = video.getBoundingClientRect();
+    const screenX = window.screenX || 0;
+    const screenY = window.screenY || 0;
     return {
-      targetRect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
-      pageEndpoint: { screenX: rect.left + rect.width * .5, screenY: rect.top + rect.height * .12 }
+      targetRect: { x: screenX + rect.left, y: screenY + rect.top, width: rect.width, height: rect.height },
+      pageEndpoint: { screenX: screenX + rect.left + rect.width * .5, screenY: screenY + rect.top + rect.height * .12 }
     };
   }
 

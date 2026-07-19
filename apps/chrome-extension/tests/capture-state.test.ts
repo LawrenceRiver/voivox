@@ -12,11 +12,12 @@ describe('normalizeCaptureState', () => {
   });
 
   it('migrates the previous active-only state without inventing a transcript', () => {
-    expect(normalizeCaptureState({ active: true, tabTitle: 'Music video' })).toEqual({
+    expect(normalizeCaptureState({ active: true, tabTitle: 'Music video', tabUrl: 'https://example.com/video' })).toEqual({
       active: true,
       mode: 'quality',
       phase: 'capturing',
-      tabTitle: 'Music video'
+      tabTitle: 'Music video',
+      tabUrl: 'https://example.com/video'
     });
   });
 

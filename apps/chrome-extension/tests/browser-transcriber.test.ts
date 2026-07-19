@@ -33,12 +33,12 @@ describe('BrowserTranscriber', () => {
 
   it('trims model output before returning or publishing it', async () => {
     const factory: PipelineFactory = async () => speechPipeline(
-      async () => ({ text: '  你好，VOIVOX。 \n' })
+      async () => ({ text: '  你好，Voice Vac。 \n' })
     );
     const transcriber = new BrowserTranscriber(factory);
 
     await expect(transcriber.transcribe(new Float32Array([0.1]), 'quality'))
-      .resolves.toBe('你好，VOIVOX。');
+      .resolves.toBe('你好，Voice Vac。');
   });
 
   it('publishes download progress and each successful lifecycle state', async () => {

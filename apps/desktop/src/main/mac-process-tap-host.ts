@@ -45,7 +45,7 @@ export class MacProcessTapHost {
       || !isPositiveTimeout(this.startTimeoutMs)
       || !isPositiveTimeout(this.terminationGraceMs)
     ) {
-      throw new Error('VOIVOX process host timeouts must be positive numbers.');
+      throw new Error('Voice Vac process host timeouts must be positive numbers.');
     }
   }
 
@@ -55,19 +55,19 @@ export class MacProcessTapHost {
     const outcome = await settleWithin(completion, this.commandTimeoutMs);
     if (outcome === timedOut) {
       await terminateChild(child, completion, 'SIGTERM', this.terminationGraceMs);
-      throw new Error(`VOIVOX process host did not list apps within ${this.commandTimeoutMs} ms.`);
+      throw new Error(`Voice Vac process host did not list apps within ${this.commandTimeoutMs} ms.`);
     }
     const output = outcome;
     const parsed: unknown = JSON.parse(output.stdout);
     if (!Array.isArray(parsed)) {
-      throw new Error('VOIVOX process host returned an invalid process list.');
+      throw new Error('Voice Vac process host returned an invalid process list.');
     }
     return parsed.filter(isMacAudioProcess);
   }
 
   async start(sessionId: string, pid: number): Promise<void> {
     if (this.recordings.has(sessionId)) {
-      throw new Error('This VOIVOX process capture is already running.');
+      throw new Error('This Voice Vac process capture is already running.');
     }
     const directory = await mkdtemp(join(tmpdir(), 'voivox-process-'));
     const outputPath = join(directory, 'capture.wav');
@@ -99,7 +99,7 @@ export class MacProcessTapHost {
     this.recordings.delete(sessionId);
     if (result.code !== 0) {
       await rm(recording.directory, { force: true, recursive: true });
-      throw new Error(result.stderr || 'VOIVOX process host could not stop the capture.');
+      throw new Error(result.stderr || 'Voice Vac process host could not stop the capture.');
     }
     return recording.outputPath;
   }
@@ -137,7 +137,7 @@ function waitForStart(child: ChildProcessWithoutNullStreams, timeoutMs: number):
     let stdout = '';
     let stderr = '';
     const timeout = setTimeout(
-      () => reject(new Error(`VOIVOX process host did not start within ${timeoutMs} ms.`)),
+      () => reject(new Error(`Voice Vac process host did not start within ${timeoutMs} ms.`)),
       timeoutMs
     );
     timeout.unref();
@@ -159,7 +159,7 @@ function waitForStart(child: ChildProcessWithoutNullStreams, timeoutMs: number):
     });
     child.once('exit', () => {
       clearTimeout(timeout);
-      reject(new Error(stderr || 'VOIVOX process host exited before recording began.'));
+      reject(new Error(stderr || 'Voice Vac process host exited before recording began.'));
     });
   });
 }
@@ -202,7 +202,7 @@ async function terminateChild<T>(
   if (forced !== timedOut) {
     return forced;
   }
-  throw new Error('VOIVOX process host could not be terminated.');
+  throw new Error('Voice Vac process host could not be terminated.');
 }
 
 async function settleWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<T | typeof timedOut> {

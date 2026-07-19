@@ -2,12 +2,12 @@
   "name": "@voivox/desktop",
   "private": true,
   "version": "0.1.1",
-  "description": "VOIVOX local-first, silent audio-to-text workstation for macOS.",
-  "author": "VOIVOX contributors",
+  "description": "Voice Vac local-first, silent audio-to-text workstation for macOS.",
+  "author": "Voice Vac contributors",
   "type": "module",
   "main": "dist/electron/main.js",
   "scripts": {
-    "build": "vite build && esbuild electron/main.ts --bundle --platform=node --target=node22 --format=esm --external:electron --outfile=dist/electron/main.js && esbuild electron/preload.ts --bundle --platform=node --target=node22 --format=cjs --external:electron --outfile=dist/electron/preload.js && npm run build --workspace=@voivox/mcp && mkdir -p dist/resources && cp ../../native/asr/voivox_asr_worker.py ../../apps/mcp/dist/index.js ../../THIRD_PARTY_NOTICES.md dist/resources/ && cp ../../LICENSE dist/resources/VOIVOX_LICENSE.txt && cp ../../node_modules/@huggingface/transformers/LICENSE dist/resources/TRANSFORMERS_LICENSE.txt && cp ../../licenses/onnxruntime-MIT.txt dist/resources/ONNXRUNTIME_LICENSE.txt && cp ../../node_modules/@modelcontextprotocol/sdk/LICENSE dist/resources/MCP_SDK_LICENSE.txt && cp ../../node_modules/zod/LICENSE dist/resources/ZOD_LICENSE.txt && cp ../../node_modules/zod-to-json-schema/LICENSE dist/resources/ZOD_TO_JSON_SCHEMA_LICENSE.txt && cp ../../node_modules/ajv/LICENSE dist/resources/AJV_LICENSE.txt && cp ../../node_modules/ajv-formats/LICENSE dist/resources/AJV_FORMATS_LICENSE.txt && cp ../../node_modules/fast-deep-equal/LICENSE dist/resources/FAST_DEEP_EQUAL_LICENSE.txt && cp ../../node_modules/fast-uri/LICENSE dist/resources/FAST_URI_LICENSE.txt && cp ../../node_modules/json-schema-traverse/LICENSE dist/resources/JSON_SCHEMA_TRAVERSE_LICENSE.txt && cp ../../node_modules/react/LICENSE dist/resources/REACT_LICENSE.txt && cp ../../node_modules/react-dom/LICENSE dist/resources/REACT_DOM_LICENSE.txt && cp ../../node_modules/electron/LICENSE dist/resources/ELECTRON_LICENSE.txt && cp ../../node_modules/electron/dist/LICENSES.chromium.html dist/resources/ELECTRON_CHROMIUM_NOTICES.html && cp ../../scripts/voivox-mcp-launcher.sh dist/resources/voivox-mcp && chmod 755 dist/resources/voivox-mcp && mv dist/resources/index.js dist/resources/voivox-mcp.mjs && (cd ../../native/macos && swift build -c release) && cp ../../native/macos/.build/release/voivox-host ../../native/macos/.build/release/voivox-native-host dist/resources/",
+    "build": "vite build && esbuild electron/main.ts --bundle --platform=node --target=node22 --format=esm --external:electron --outfile=dist/electron/main.js && esbuild electron/preload.ts --bundle --platform=node --target=node22 --format=cjs --external:electron --outfile=dist/electron/preload.js && npm run build --workspace=@voivox/mcp && mkdir -p dist/resources && cp ../../native/asr/voivox_asr_worker.py ../../apps/mcp/dist/index.js ../../THIRD_PARTY_NOTICES.md dist/resources/ && cp ../../LICENSE dist/resources/VACVOX_LICENSE.txt && cp ../../node_modules/@huggingface/transformers/LICENSE dist/resources/TRANSFORMERS_LICENSE.txt && cp ../../licenses/onnxruntime-MIT.txt dist/resources/ONNXRUNTIME_LICENSE.txt && cp ../../node_modules/@modelcontextprotocol/sdk/LICENSE dist/resources/MCP_SDK_LICENSE.txt && cp ../../node_modules/zod/LICENSE dist/resources/ZOD_LICENSE.txt && cp ../../node_modules/zod-to-json-schema/LICENSE dist/resources/ZOD_TO_JSON_SCHEMA_LICENSE.txt && cp ../../node_modules/ajv/LICENSE dist/resources/AJV_LICENSE.txt && cp ../../node_modules/ajv-formats/LICENSE dist/resources/AJV_FORMATS_LICENSE.txt && cp ../../node_modules/fast-deep-equal/LICENSE dist/resources/FAST_DEEP_EQUAL_LICENSE.txt && cp ../../node_modules/fast-uri/LICENSE dist/resources/FAST_URI_LICENSE.txt && cp ../../node_modules/json-schema-traverse/LICENSE dist/resources/JSON_SCHEMA_TRAVERSE_LICENSE.txt && cp ../../node_modules/react/LICENSE dist/resources/REACT_LICENSE.txt && cp ../../node_modules/react-dom/LICENSE dist/resources/REACT_DOM_LICENSE.txt && cp ../../node_modules/electron/LICENSE dist/resources/ELECTRON_LICENSE.txt && cp ../../node_modules/electron/dist/LICENSES.chromium.html dist/resources/ELECTRON_CHROMIUM_NOTICES.html && cp ../../scripts/voivox-mcp-launcher.sh dist/resources/voivox-mcp && chmod 755 dist/resources/voivox-mcp && mv dist/resources/index.js dist/resources/voivox-mcp.mjs && (cd ../../native/macos && swift build -c release) && cp ../../native/macos/.build/release/voivox-host ../../native/macos/.build/release/voivox-native-host dist/resources/",
     "start": "npm run build && electron dist/electron/main.js",
     "typecheck": "tsc --noEmit",
     "package:dir": "npm run build && electron-builder --dir --mac --arm64 --publish never",
@@ -16,6 +16,7 @@
   "dependencies": {
     "@voivox/core": "file:../../packages/core",
     "@voivox/i18n": "file:../../packages/i18n",
+    "@voivox/ui": "file:../../packages/ui",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
@@ -26,7 +27,7 @@
   },
   "build": {
     "appId": "io.voivox.app",
-    "productName": "VOIVOX",
+    "productName": "Voice Vac",
     "electronVersion": "37.10.3",
     "asar": true,
     "directories": {
@@ -49,7 +50,7 @@
       "identity": "-",
       "hardenedRuntime": false,
       "extendInfo": {
-        "NSAudioCaptureUsageDescription": "VOIVOX 需要访问所选应用的音频，以便在本机静音转写。"
+        "NSAudioCaptureUsageDescription": "Voice Vac 需要访问所选应用的音频，以便在本机静音转写。"
       },
       "target": [
         {

@@ -102,6 +102,20 @@ h1, h2, h3 {
 .language-toggle i { background: var(--line); height: 0.75rem; width: 0.0625rem; }
 
 .app-canvas { margin: 0 auto; max-width: 85rem; }
+.app-canvas > .tunnel-machine { margin: 1.15rem 0; }
+.legacy-workspace { margin-top: 1rem; }
+.legacy-workspace > summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: .72rem;
+  letter-spacing: .02em;
+  list-style: none;
+  margin: 0 auto .7rem;
+  max-width: 85rem;
+  text-align: right;
+}
+.legacy-workspace > summary::-webkit-details-marker { display: none; }
+.legacy-workspace > summary::before { content: '＋ '; color: var(--amber-deep); }
 .hero-card {
   align-items: center;
   background:
@@ -602,3 +616,56 @@ h1, h2, h3 {
 
 @keyframes listen-wave { from { transform: scaleY(0.48); } to { transform: scaleY(1); } }
 @keyframes status-breathe { 50% { box-shadow: 0 0 0 0.38rem transparent; } }
+
+/* Voice Vac machine pass: the tunnel is the product, the rest is a quiet workbench. */
+:root {
+  --canvas: #e9e0d0;
+  --paper: #fbf5e9;
+  --paper-muted: #f4ecdc;
+  --ink: #2b3b35;
+  --muted: #7b786b;
+  --quiet: #a19582;
+  --teal: #49675c;
+  --teal-deep: #2e4d44;
+  --mint: #d6d0bc;
+  --mint-soft: #f0e5d1;
+  --amber: #d5964d;
+  --amber-deep: #95693d;
+  --line: #d3c3aa;
+  --danger: #b35a45;
+  --danger-bg: #f7e4d8;
+}
+body {
+  background:
+    radial-gradient(circle at 9% 8%, rgb(255 255 255 / 66%), transparent 24%),
+    linear-gradient(148deg, #f1eadc 0%, var(--canvas) 54%, #e1d4bd 100%);
+}
+.app-shell { padding-top: .75rem; }
+.app-header { max-width: 94rem; padding-bottom: .55rem; }
+.brand-mark { background: var(--teal-deep); border-color: #e7d6b7; box-shadow: 0 .18rem 0 #b8a78b; }
+.brand-mark i { background: #f3e8d2; }
+.brand strong { color: var(--teal-deep); }
+.language-toggle { background: rgb(251 245 233 / 86%); border-color: #cdbb9b; box-shadow: 0 .16rem .5rem rgb(82 60 36 / 8%); }
+.language-toggle span.is-current { color: var(--wood-deep, #68452d); }
+.app-canvas { align-items: center; display: flex; flex-direction: column; justify-content: center; max-width: 94rem; min-height: calc(100vh - 4.1rem); }
+.app-canvas > .tunnel-machine { margin: .3rem 0 1.1rem; width: min(62rem, 100%); }
+.legacy-workspace > summary { color: var(--muted); max-width: 94rem; }
+
+@media (max-width: 43rem) {
+  .app-canvas > .tunnel-machine { width: 100%; }
+}
+
+/* The desktop client is intentionally a small floating capsule. */
+html, body, #root { background: transparent; }
+.app-shell { min-height: 100vh; padding: .3rem .45rem .35rem; position: relative; }
+.app-header { left: 1rem; max-width: none; padding: 0; pointer-events: none; position: absolute; right: 1rem; top: .58rem; z-index: 5; }
+.app-header .brand, .app-header .language-toggle { pointer-events: auto; }
+.brand { font-size: .72rem; gap: .38rem; }
+.brand-mark { border-radius: .6rem; box-shadow: 0 1px 2px rgb(44 62 70 / 18%); height: 1.28rem; width: 1.28rem; }
+.brand-mark i { height: .22rem; width: .09rem; }
+.brand-mark i:nth-child(2) { height: .44rem; }
+.language-toggle { background: rgb(255 255 255 / 82%); box-shadow: 0 2px 8px rgb(44 62 70 / 9%); font-size: .46rem; gap: .32rem; padding: .3rem .48rem; }
+.language-toggle i { height: .55rem; }
+.app-canvas { min-height: 0; padding-top: .12rem; width: 100%; }
+.app-canvas > .tunnel-machine { margin: 0; }
+.legacy-workspace { display: none; }

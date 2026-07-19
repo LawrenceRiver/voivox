@@ -1,6 +1,13 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
-import type { CaptureSession, CaptureSource, DerivedTranscript, MacAudioProcess } from '@voivox/core';
+import type {
+  ActiveVideoTranscriptionOptions,
+  CaptureSession,
+  CaptureSource,
+  DerivedTranscript,
+  MacAudioProcess,
+  TranscriptResult
+} from '@voivox/core';
 
 export type VoivoxConnection = {
   baseUrl: string;
@@ -12,12 +19,23 @@ export type VoivoxClientOptions = {
   requestTimeoutMs?: number;
 };
 
+export class VoivoxRequestError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+    readonly status?: number
+  ) {
+    super(message);
+    this.name = 'VoivoxRequestError';
+  }
+}
+
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_CAPTURE_STOP_TIMEOUT_MS = 30 * 60_000;
 const MCP_PROOF_PROTOCOL_VERSION = 1;
 const MAXIMUM_PROOF_RESPONSE_BYTES = 4_096;
 const ENCODED_SHA256 = /^[A-Za-z0-9_-]{43}$/;
-const INVALID_SERVER_PROOF_MESSAGE = 'VOIVOX desktop app identity proof is invalid. Reopen the app, then try again.';
+const INVALID_SERVER_PROOF_MESSAGE = 'Voice Vac desktop app identity proof is invalid. Reopen the app, then try again.';
 
 export class VoivoxClient {
   private readonly baseUrl: string;
@@ -33,12 +51,23 @@ export class VoivoxClient {
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.captureStopTimeoutMs = options.captureStopTimeoutMs ?? DEFAULT_CAPTURE_STOP_TIMEOUT_MS;
     if (!isPositiveTimeout(this.requestTimeoutMs) || !isPositiveTimeout(this.captureStopTimeoutMs)) {
-      throw new Error('VOIVOX request timeouts must be positive numbers.');
+      throw new Error('Voice Vac request timeouts must be positive numbers.');
     }
   }
 
   async status(): Promise<{ activeSession?: CaptureSession; sessionCount: number }> {
     return this.requestJson('/v1/status');
+  }
+
+  async transcribeActiveVideo(options: ActiveVideoTranscriptionOptions): Promise<TranscriptResult> {
+    return this.requestJson('/v1/transcriptions/active-video', {
+      body: JSON.stringify(options),
+      method: 'POST'
+    });
+  }
+
+  async getLatestTranscript(): Promise<TranscriptResult> {
+    return this.requestJson('/v1/transcripts/latest');
   }
 
   async startCapture(source: CaptureSource): Promise<CaptureSession> {
@@ -122,18 +151,18 @@ export class VoivoxClient {
       receivedResponse = true;
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({} as { error?: string }));
-        const message = typeof error.error === 'string' ? error.error : `VOIVOX returned ${response.status}.`;
-        throw new Error(message);
+        const error = await response.json().catch(() => ({} as { error?: string; code?: string }));
+        const message = typeof error.error === 'string' ? error.error : `Voice Vac returned ${response.status}.`;
+        throw new VoivoxRequestError(message, typeof error.code === 'string' ? error.code : undefined, response.status);
       }
 
       return await read(response);
     } catch (error) {
       if (controller.signal.aborted) {
-        throw new Error(`VOIVOX desktop app did not respond within ${timeoutMs} ms.`);
+        throw new Error(`Voice Vac desktop app did not respond within ${timeoutMs} ms.`);
       }
       if (!receivedResponse) {
-        throw new Error('VOIVOX desktop app is not reachable. Open the app, then try again.');
+        throw new Error('Voice Vac desktop app is not reachable. Open the app, then try again.');
       }
       throw error;
     } finally {
@@ -201,10 +230,10 @@ export class VoivoxClient {
         throw error;
       }
       if (controller.signal.aborted) {
-        throw new Error(`VOIVOX desktop app did not respond within ${this.requestTimeoutMs} ms.`);
+        throw new Error(`Voice Vac desktop app did not respond within ${this.requestTimeoutMs} ms.`);
       }
       if (!receivedResponse) {
-        throw new Error('VOIVOX desktop app is not reachable. Open the app, then try again.');
+        throw new Error('Voice Vac desktop app is not reachable. Open the app, then try again.');
       }
       throw invalidServerProof();
     } finally {

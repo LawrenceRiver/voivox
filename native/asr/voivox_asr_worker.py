@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Persistent VOIVOX adapter for mlx-qwen3-asr.
+"""Persistent Voice Vac adapter for mlx-qwen3-asr.
 
 Requests and responses are newline-delimited JSON. Audio is received as in-memory
 16 kHz signed PCM and written only to a temporary WAV file for the duration of
@@ -26,7 +26,7 @@ def main():
         for line in sys.stdin:
             try:
                 request = json.loads(line)
-                emit({"id": request.get("id"), "error": "VOIVOX local ASR is not installed. Install mlx-qwen3-asr with Python 3.10+ first: " + str(error)})
+                emit({"id": request.get("id"), "error": "Voice Vac local ASR is not installed. Install mlx-qwen3-asr with Python 3.10+ first: " + str(error)})
             except Exception:
                 pass
         return

@@ -1,4 +1,4 @@
-# VOIVOX desktop UI direction
+# Voice Vac desktop UI direction
 
 ## Grounding
 
@@ -29,7 +29,7 @@
 
 ```
 ┌─ brand / connection ───────────────────────────────────────────────┐
-│  VOIVOX                               [audio engine ● ready]       │
+│  Voice Vac                               [audio engine ● ready]       │
 ├─ source rail ───────────┬─ capture workspace ──────────────────────┤
 │  Chrome tab             │  selected source                         │
 │  macOS app              │  [ start silent capture ]                │
@@ -56,3 +56,9 @@ The revised layout starts with source clarity and the time ruler. It uses a narr
 - **Empty:** directs the user to select a source and says no audio is stored unless retention is enabled.
 - **Error:** names the failing source or permission and offers the specific next step, never a generic failure toast.
 - **Keyboard:** source choices and primary capture action are native buttons; focus rings remain visible; transcript uses semantic headings and a live region only for state changes.
+
+## Design pass 2 — glass capsule and real-time 3D model
+
+The primary App surface is a small always-on-top capsule, sized like a utility float rather than a dashboard. Its left port holds a downward-dragging vacuum head; the flexible hose lengthens toward the current video and returns when released. The right port remains a glass play/pause control. Transcript text appears in a speech bubble only as output arrives, like a Codex pet message.
+
+The model layer is implemented with Three.js r177 (`packages/ui/src/VacuumMachine3D.tsx`): `CapsuleGeometry`, `TubeGeometry` over a `CatmullRomCurve3`, torus port rings, physical glass materials, soft directional lighting, and animated hose rings. A small CSS fallback preserves the interaction affordance on machines where WebGL is unavailable; it is not the primary model path. The same state semantics drive drag, suction flow, pause, completion, and error animation across App, Extension, and MCP monitor.

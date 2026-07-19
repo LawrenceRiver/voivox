@@ -29,14 +29,14 @@ describe('MacProcessTapHost process bounds', () => {
   it('times out and force-terminates a process-list helper that never answers', async () => {
     const outcome = await boundedOutcome(createHost().listProcesses());
 
-    expect(outcome).toBe('VOIVOX process host did not list apps within 25 ms.');
+    expect(outcome).toBe('Voice Vac process host did not list apps within 25 ms.');
   });
 
   it('force-terminates failed startup cleanup instead of awaiting the helper forever', async () => {
     const host = createHost();
     const outcome = await boundedOutcome(host.start('never-started', 41));
 
-    expect(outcome).toBe('VOIVOX process host did not start within 25 ms.');
+    expect(outcome).toBe('Voice Vac process host did not start within 25 ms.');
     await expect(host.discardAll()).resolves.toBeUndefined();
   });
 

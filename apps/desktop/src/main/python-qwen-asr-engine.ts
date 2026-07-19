@@ -42,7 +42,7 @@ export class PythonQwenAsrEngine implements LocalAsrEngine {
       !isPositiveTimeout(this.requestTimeoutMs)
       || !isPositiveTimeout(this.terminationGraceMs)
     ) {
-      throw new Error('VOIVOX local ASR timeouts must be positive numbers.');
+      throw new Error('Voice Vac local ASR timeouts must be positive numbers.');
     }
   }
 
@@ -71,7 +71,7 @@ export class PythonQwenAsrEngine implements LocalAsrEngine {
         if (!this.pending.has(id)) {
           return;
         }
-        const error = new Error(`VOIVOX local ASR timed out after ${this.requestTimeoutMs} ms.`);
+        const error = new Error(`Voice Vac local ASR timed out after ${this.requestTimeoutMs} ms.`);
         if (this.child === child) {
           this.child = undefined;
         }
@@ -93,7 +93,7 @@ export class PythonQwenAsrEngine implements LocalAsrEngine {
   close(): Promise<void> {
     const child = this.child;
     this.child = undefined;
-    this.rejectAll(new Error('VOIVOX local ASR stopped.'));
+    this.rejectAll(new Error('Voice Vac local ASR stopped.'));
     if (child) {
       this.terminateWorker(child);
     }

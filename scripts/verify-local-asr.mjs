@@ -49,7 +49,7 @@ async function main() {
   ]);
 
   console.error(
-    `[VOIVOX] Extracting ${options.durationSeconds}s from ${options.startSeconds}s as 16 kHz mono PCM WAV...`
+    `[Voice Vac] Extracting ${options.durationSeconds}s from ${options.startSeconds}s as 16 kHz mono PCM WAV...`
   );
   await runFfmpeg([
     '-y',
@@ -89,7 +89,7 @@ async function main() {
 
   let lastProgressBucket = -1;
   console.error(
-    `[VOIVOX] Loading ${model.id}@${model.revision} (${model.dtype}) for local inference...`
+    `[Voice Vac] Loading ${model.id}@${model.revision} (${model.dtype}) for local inference...`
   );
   const modelLoadStartedAt = performance.now();
   const transcriber = await pipeline('automatic-speech-recognition', model.id, {
@@ -101,7 +101,7 @@ async function main() {
       const bucket = Math.floor(Math.min(100, Math.max(0, progress)) / 10);
       if (bucket > lastProgressBucket) {
         lastProgressBucket = bucket;
-        console.error(`[VOIVOX] Model artifacts: ${bucket * 10}%`);
+        console.error(`[Voice Vac] Model artifacts: ${bucket * 10}%`);
       }
     },
     revision: model.revision
@@ -111,7 +111,7 @@ async function main() {
   let output;
   const startedAt = performance.now();
   try {
-    console.error(`[VOIVOX] Running ${options.mode} local ASR on ${actualDurationSeconds.toFixed(3)}s audio...`);
+    console.error(`[Voice Vac] Running ${options.mode} local ASR on ${actualDurationSeconds.toFixed(3)}s audio...`);
     output = await transcriber(audio, {
       chunk_length_s: 30,
       return_timestamps: false,
@@ -238,6 +238,6 @@ async function hashFile(path) {
 }
 
 main().catch((error) => {
-  console.error(`[VOIVOX] ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+  console.error(`[Voice Vac] ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
   process.exitCode = 1;
 });

@@ -27,7 +27,7 @@ struct VOIVOXHost {
                 throw HostError.invalidArguments
             }
         } catch {
-            FileHandle.standardError.write(Data("VOIVOX host error: \(error.localizedDescription)\n".utf8))
+            FileHandle.standardError.write(Data("Voice Vac host error: \(error.localizedDescription)\n".utf8))
             exit(1)
         }
     }
@@ -239,13 +239,13 @@ private enum HostError: LocalizedError {
         case .invalidArguments:
             return "Use `list` or `record <pid> <output.wav> [--audible]`."
         case .coreAudio(let operation, let status):
-            return "CoreAudio returned OSStatus \(status) while calling \(operation). Grant VOIVOX system-audio recording permission in System Settings, then try again."
+            return "CoreAudio returned OSStatus \(status) while calling \(operation). Grant Voice Vac system-audio recording permission in System Settings, then try again."
         case .processUnavailable(let pid):
             return "No CoreAudio process object exists for pid \(pid)."
         case .unsupportedFormat:
             return "CoreAudio returned an unsupported tap format."
         case .unsupportedSystem:
-            return "VOIVOX per-app capture requires macOS 14.2 or newer."
+            return "Voice Vac per-app capture requires macOS 14.2 or newer."
         }
     }
 }
@@ -277,7 +277,7 @@ private final class ProcessTapFileRecorder {
     func start() throws {
         let processObjectID = try translate(pid: configuration.pid)
         let description = CATapDescription(monoMixdownOfProcesses: [processObjectID])
-        description.name = "VOIVOX \(configuration.pid)"
+        description.name = "Voice Vac \(configuration.pid)"
         description.isPrivate = true
         description.muteBehavior = configuration.keepsPlaybackAudible
             ? CATapMuteBehavior.unmuted
@@ -295,7 +295,7 @@ private final class ProcessTapFileRecorder {
         format = audioFormat
         outputFile = try AVAudioFile(forWriting: outputURL, settings: audioFormat.settings)
 
-        let queue = DispatchQueue(label: "VOIVOX.ProcessTap.IO", qos: .userInitiated)
+        let queue = DispatchQueue(label: "Voice Vac.ProcessTap.IO", qos: .userInitiated)
         try check(AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateDeviceID, queue) { [weak self] _, inputData, _, _, _ in
             self?.write(tapInputBuffer(inputData))
         }, whileCalling: "AudioDeviceCreateIOProcIDWithBlock")
@@ -365,7 +365,7 @@ private final class ProcessTapFileRecorder {
 
     private func createAggregateDevice(tapUID: String) throws {
         let properties: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "VOIVOX Process Tap",
+            kAudioAggregateDeviceNameKey: "Voice Vac Process Tap",
             kAudioAggregateDeviceUIDKey: "io.voivox.tap.\(UUID().uuidString)",
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceTapAutoStartKey: false,

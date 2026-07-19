@@ -49,7 +49,7 @@ export async function discoverDesktopApp({
 
 async function readHealthResponse(response: Response): Promise<HealthResponse> {
   if (!response.ok) {
-    throw new Error('VOIVOX desktop health check failed.');
+    throw new Error('Voice Vac desktop health check failed.');
   }
   const body = await response.json() as unknown;
   if (
@@ -61,7 +61,7 @@ async function readHealthResponse(response: Response): Promise<HealthResponse> {
     || typeof body.capabilities.extensionDiscovery !== 'boolean'
     || !isLocalAsrAvailability(body.capabilities.localAsr)
   ) {
-    throw new Error('VOIVOX desktop health response was invalid.');
+    throw new Error('Voice Vac desktop health response was invalid.');
   }
   return body as HealthResponse;
 }

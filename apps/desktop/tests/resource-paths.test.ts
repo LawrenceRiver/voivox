@@ -10,9 +10,9 @@ describe('resolveBundledResource', () => {
       resolveBundledResource('voivox-host', {
         isPackaged: true,
         moduleUrl: 'file:///ignored/main.js',
-        resourcesPath: '/Applications/VOIVOX.app/Contents/Resources'
+        resourcesPath: '/Applications/Voice Vac.app/Contents/Resources'
       })
-    ).toBe(join('/Applications/VOIVOX.app/Contents/Resources', 'voivox', 'voivox-host'));
+    ).toBe(join('/Applications/Voice Vac.app/Contents/Resources', 'voivox', 'voivox-host'));
   });
 
   it('uses the local dist resources directory during development', () => {

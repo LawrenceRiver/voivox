@@ -86,7 +86,7 @@ test('builds honest machine-readable and Markdown evidence', () => {
   assert.match(markdown, /ff4177021cc41f7db950912b73ea4fdf7d01d8e7/);
 });
 
-test('labels quality evidence as the VOIVOX quality model', () => {
+test('labels quality evidence as the Voice Vac quality model', () => {
   const evidence = buildEvidence({
     audioSha256: 'audio-hash',
     audioSizeBytes: 1,
@@ -105,8 +105,8 @@ test('labels quality evidence as the VOIVOX quality model', () => {
     totalVerificationSeconds: 2
   });
 
-  assert.match(evidence.limitations[2], /VOIVOX quality mode/);
-  assert.doesNotMatch(evidence.limitations[2], /VOIVOX fast mode/);
+  assert.match(evidence.limitations[2], /Voice Vac quality mode/);
+  assert.doesNotMatch(evidence.limitations[2], /Voice Vac fast mode/);
 });
 
 test('parses the reproducible verification command options', () => {

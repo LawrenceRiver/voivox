@@ -1,4 +1,4 @@
-# VOIVOX Fast / Quality local-ASR comparison
+# Voice Vac Fast / Quality local-ASR comparison
 
 This comparison uses the same 0–30 second segment from [大学生勇闯音乐圈：Abuse 正式 M/V 上线](https://www.xiaohongshu.com/explore/699ee564000000001b01624a). FFmpeg extracted the same 16 kHz mono PCM audio for both runs. No speech API was used; model inference ran locally.
 
