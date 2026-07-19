@@ -12,6 +12,7 @@ import {
 } from '@voivox/core';
 import { BufferedAsrPipeline } from '../src/main/asr-pipeline.js';
 import { DesktopRuntime } from '../src/main/desktop-runtime.js';
+import { ExtensionCaptureController } from '../src/main/extension-capture-controller.js';
 import { startLocalAsrCapabilityProbe } from '../src/main/local-asr-capability.js';
 import { startWithExtensionDiscovery } from '../src/main/local-discovery.js';
 import { MacProcessTapHost } from '../src/main/mac-process-tap-host.js';
@@ -63,6 +64,11 @@ async function bootstrap(): Promise<void> {
       window?.webContents.send('voivox:asr-error', error.message);
     }
   });
+  const extensionCaptureController = new ExtensionCaptureController({
+    pipeline: asrPipeline,
+    service: runtime.getService(),
+    tunnelSessions: runtime.getTunnelSessions()
+  });
   const processTapHost = new MacProcessTapHost(
     resolveBundledResource('voivox-host', {
       isPackaged: app.isPackaged,
@@ -110,6 +116,7 @@ async function bootstrap(): Promise<void> {
         extensionDiscovery: nativeMessagingReady,
         localAsr: localAsrProbe.getStatus()
       }),
+      extensionCaptureController,
       service: runtime.getService(),
       tunnelSessions: runtime.getTunnelSessions(),
       listMacProcesses: () => processTapHost.listProcesses(),

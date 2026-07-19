@@ -135,7 +135,8 @@ describe('Voice Vac loopback API', () => {
         documentId: 'doc-9',
         dropToken: 'VOICE_VAC_DROP_V1|2b0fe529-4021-4674-b55e-1cf081f947dd|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
         title: 'Demo MV',
-        state: 'detecting'
+        state: 'detecting',
+        url: 'https://example.test/demo-mv'
       })
     });
     expect(created.status).toBe(201);
@@ -161,7 +162,7 @@ describe('Voice Vac loopback API', () => {
     expect(deleted.status).toBe(204);
   });
 
-  it('requires fixed Chrome identity on create and rejects identity fields on patch', async () => {
+  it('requires fixed Chrome identity and a canonical HTTP URL on tunnel creation', async () => {
     server = await createVoivoxLoopbackServer({ token: 'desktop-only-token', extensionToken: 'chrome-bridge-token' });
     const extensionHeaders = {
       authorization: 'Bearer chrome-bridge-token',
@@ -173,13 +174,26 @@ describe('Voice Vac loopback API', () => {
     });
     expect(missingIdentity.status).toBe(400);
 
+    const identity = {
+      tabId: 9,
+      frameId: 0,
+      documentId: 'doc-9',
+      dropToken: 'VOICE_VAC_DROP_V1|2b0fe529-4021-4674-b55e-1cf081f947dd|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+    };
+    for (const url of [undefined, '', 'file:///tmp/video.mp4']) {
+      const invalidUrl = await fetch(`${server.baseUrl}/v1/extension/tunnel-sessions`, {
+        method: 'POST',
+        headers: extensionHeaders,
+        body: JSON.stringify({ ...identity, ...(url === undefined ? {} : { url }) })
+      });
+      expect(invalidUrl.status).toBe(400);
+    }
+
     const created = await fetch(`${server.baseUrl}/v1/extension/tunnel-sessions`, {
       method: 'POST', headers: extensionHeaders,
       body: JSON.stringify({
-        tabId: 9,
-        frameId: 0,
-        documentId: 'doc-9',
-        dropToken: 'VOICE_VAC_DROP_V1|2b0fe529-4021-4674-b55e-1cf081f947dd|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+        ...identity,
+        url: 'https://example.test/video'
       })
     });
     const session = await created.json() as { id: string };
@@ -190,12 +204,47 @@ describe('Voice Vac loopback API', () => {
     expect(retarget.status).toBe(400);
   });
 
-  it('restricts the extension token to completed text imports and refuses Chrome audio routes', async () => {
+  it('routes restricted extension PCM through one capture controller', async () => {
+    const mutations: Array<Record<string, unknown>> = [];
+    const capturing = {
+      id: 'session_chrome_1',
+      revision: 0,
+      source: { kind: 'chrome-tab' as const, label: 'Current tab' },
+      status: 'capturing' as const,
+      createdAt: '2026-07-20T00:00:00.000Z',
+      rawSegments: [],
+      derivedTranscripts: []
+    };
     server = await createVoivoxLoopbackServer({
       token: 'desktop-only-token',
-      extensionToken: 'chrome-bridge-token'
+      extensionToken: 'chrome-bridge-token',
+      extensionCaptureController: {
+        hasCapture: (sessionId: string) => sessionId === capturing.id,
+        getTranscriptRevision: () => 0,
+        startCapture: (request: Record<string, unknown>) => {
+          mutations.push({ operation: 'start', request });
+          return capturing;
+        },
+        ingestAudio: (sessionId: string, sequence: number, pcm: Uint8Array) => {
+          mutations.push({ operation: 'audio', sessionId, sequence, pcm: [...pcm] });
+        },
+        waitForTranscript: async (sessionId: string, afterRevision: number, waitMs: number) => {
+          mutations.push({ operation: 'transcript', sessionId, afterRevision, waitMs });
+          return {
+            sessionId,
+            afterRevision,
+            revision: 1,
+            status: 'capturing' as const,
+            appendedSegments: [{ startMs: 0, endMs: 1_000, text: '本地 Qwen。' }]
+          };
+        },
+        stopCapture: async (sessionId: string) => {
+          mutations.push({ operation: 'stop', sessionId });
+          return { ...capturing, revision: 2, status: 'complete' as const };
+        }
+      }
     });
-    const headers = {
+    const jsonHeaders = {
       authorization: 'Bearer chrome-bridge-token',
       'content-type': 'application/json',
       origin: VOIVOX_EXTENSION_ORIGIN
@@ -203,84 +252,71 @@ describe('Voice Vac loopback API', () => {
 
     const created = await fetch(`${server.baseUrl}/v1/extension/captures`, {
       method: 'POST',
-      headers,
-      body: JSON.stringify({ source: { kind: 'chrome-tab', label: 'Current tab' } })
-    });
-    const chunk = await fetch(`${server.baseUrl}/v1/extension/captures/obsolete-session/audio`, {
-      method: 'POST',
-      headers,
+      headers: jsonHeaders,
       body: JSON.stringify({
-        encoding: 'pcm-s16le',
-        sampleRate: 16_000,
-        channels: 1,
-        data: 'AACAgH//'
+        jobId: 'job-1',
+        mode: 'fast',
+        source: {
+          kind: 'chrome-tab',
+          label: 'Current tab',
+          url: 'https://example.test/current-tab'
+        },
+        tunnelSessionId: 'tunnel-1'
       })
     });
-    const stopped = await fetch(`${server.baseUrl}/v1/extension/captures/obsolete-session/stop`, {
+    expect(created.status).toBe(201);
+
+    const chunk = await fetch(`${server.baseUrl}/v1/extension/captures/${capturing.id}/audio/0`, {
       method: 'POST',
-      headers
+      headers: {
+        authorization: 'Bearer chrome-bridge-token',
+        'content-type': 'application/octet-stream',
+        origin: VOIVOX_EXTENSION_ORIGIN
+      },
+      body: new Uint8Array([0, 0, 1, 0])
+    });
+    expect(chunk.status).toBe(204);
+
+    const transcript = await fetch(
+      `${server.baseUrl}/v1/extension/captures/${capturing.id}/transcript?after_revision=0&wait_ms=25000`,
+      { headers: jsonHeaders }
+    );
+    expect(transcript.status).toBe(200);
+    expect(await transcript.json()).toMatchObject({
+      revision: 1,
+      appendedSegments: [{ text: '本地 Qwen。' }]
     });
 
-    expect(created.status).toBe(404);
-    expect(chunk.status).toBe(404);
-    expect(stopped.status).toBe(404);
+    const stopped = await fetch(`${server.baseUrl}/v1/extension/captures/${capturing.id}/stop`, {
+      method: 'POST',
+      headers: jsonHeaders
+    });
+    expect(stopped.status).toBe(200);
+    expect(await stopped.json()).toMatchObject({ status: 'complete' });
+    expect(mutations).toEqual([
+      {
+        operation: 'start',
+        request: {
+          jobId: 'job-1',
+          mode: 'fast',
+          source: {
+            kind: 'chrome-tab',
+            label: 'Current tab',
+            url: 'https://example.test/current-tab'
+          },
+          tunnelSessionId: 'tunnel-1'
+        }
+      },
+      { operation: 'audio', sessionId: capturing.id, sequence: 0, pcm: [0, 0, 1, 0] },
+      { operation: 'transcript', sessionId: capturing.id, afterRevision: 0, waitMs: 25_000 },
+      { operation: 'stop', sessionId: capturing.id }
+    ]);
 
-    const rejected = await fetch(`${server.baseUrl}/v1/sessions`, { headers });
+    const rejected = await fetch(`${server.baseUrl}/v1/sessions`, { headers: jsonHeaders });
     expect(rejected.status).toBe(401);
   });
 
-  it('imports browser-local transcript text for MCP without uploading audio', async () => {
-    server = await createVoivoxLoopbackServer({
-      token: 'desktop-only-token',
-      extensionToken: 'chrome-bridge-token'
-    });
-    const desktopHeaders = {
-      authorization: 'Bearer desktop-only-token',
-      'content-type': 'application/json'
-    };
-    const extensionHeaders = {
-      authorization: 'Bearer chrome-bridge-token',
-      'content-type': 'application/json',
-      origin: VOIVOX_EXTENSION_ORIGIN
-    };
-    const activeResponse = await fetch(`${server.baseUrl}/v1/captures`, {
-      method: 'POST',
-      headers: desktopHeaders,
-      body: JSON.stringify({ source: { kind: 'macos-process', label: 'Music', processId: 42 } })
-    });
-    const active = await activeResponse.json() as { id: string };
-
-    const importedResponse = await fetch(`${server.baseUrl}/v1/extension/transcripts`, {
-      method: 'POST',
-      headers: extensionHeaders,
-      body: JSON.stringify({
-        source: { kind: 'chrome-tab', label: 'My MV' },
-        durationMs: 12_500,
-        transcript: '这是 Chrome 内置本地模型的转写。'
-      })
-    });
-    const imported = await importedResponse.json() as { id: string };
-
-    expect(importedResponse.status).toBe(201);
-    expect(imported).toMatchObject({
-      source: { kind: 'chrome-tab', label: 'My MV' },
-      status: 'complete',
-      rawSegments: [{ startMs: 0, endMs: 12_500, text: '这是 Chrome 内置本地模型的转写。' }]
-    });
-
-    const sessionsResponse = await fetch(`${server.baseUrl}/v1/sessions`, { headers: desktopHeaders });
-    const sessionsBody = await sessionsResponse.json() as { sessions: Array<{ id: string }> };
-    expect(sessionsBody.sessions.map((session) => session.id)).toEqual([imported.id, active.id]);
-    const statusResponse = await fetch(`${server.baseUrl}/v1/status`, { headers: desktopHeaders });
-    expect(await statusResponse.json()).toMatchObject({ activeSession: { id: active.id } });
-  });
-
-  it.each([
-    { source: { kind: 'macos-process', label: 'Safari' }, durationMs: 1_000, transcript: 'text' },
-    { source: { kind: 'chrome-tab', label: 'Tab' }, durationMs: -1, transcript: 'text' },
-    { source: { kind: 'chrome-tab', label: 'Tab' }, durationMs: 600_001, transcript: 'text' },
-    { source: { kind: 'chrome-tab', label: 'Tab' }, durationMs: 1_000, transcript: '   ' }
-  ])('rejects an invalid browser-local transcript import: %o', async (body) => {
+  it('removes the completed-text extension transcript production route', async () => {
     server = await createVoivoxLoopbackServer({
       token: 'desktop-only-token',
       extensionToken: 'chrome-bridge-token'
@@ -293,10 +329,287 @@ describe('Voice Vac loopback API', () => {
         'content-type': 'application/json',
         origin: VOIVOX_EXTENSION_ORIGIN
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify({
+        source: { kind: 'chrome-tab', label: 'My MV' },
+        durationMs: 12_500,
+        transcript: 'This completed-text import must stay unavailable.'
+      })
+    });
+    expect(response.status).toBe(404);
+  });
+
+  it('returns 204 when a transcript long-poll reaches its unchanged ceiling', async () => {
+    const waits: Array<{ sessionId: string; afterRevision: number; waitMs: number }> = [];
+    server = await createVoivoxLoopbackServer({
+      token: 'desktop-only-token',
+      extensionToken: 'chrome-bridge-token',
+      extensionCaptureController: {
+        hasCapture: (sessionId: string) => sessionId === 'session_chrome_1',
+        getTranscriptRevision: () => 0,
+        startCapture: () => extensionCaptureSession(),
+        ingestAudio: () => undefined,
+        waitForTranscript: async (sessionId: string, afterRevision: number, waitMs: number) => {
+          waits.push({ sessionId, afterRevision, waitMs });
+          return undefined;
+        },
+        stopCapture: async () => extensionCaptureSession('complete')
+      }
     });
 
+    const response = await fetch(
+      `${server.baseUrl}/v1/extension/captures/session_chrome_1/transcript?after_revision=0&wait_ms=7`,
+      { headers: extensionHeaders() }
+    );
+
+    expect(response.status).toBe(204);
+    expect(await response.text()).toBe('');
+    expect(waits).toEqual([{
+      sessionId: 'session_chrome_1',
+      afterRevision: 0,
+      waitMs: 7
+    }]);
+  });
+
+  it('rejects a future transcript cursor as a stable client error without waiting', async () => {
+    let waited = false;
+    server = await createVoivoxLoopbackServer({
+      token: 'desktop-only-token',
+      extensionToken: 'chrome-bridge-token',
+      extensionCaptureController: {
+        hasCapture: (sessionId: string) => sessionId === 'session_chrome_1',
+        getTranscriptRevision: () => 2,
+        startCapture: () => extensionCaptureSession(),
+        ingestAudio: () => undefined,
+        waitForTranscript: async () => {
+          waited = true;
+          return undefined;
+        },
+        stopCapture: async () => extensionCaptureSession('complete')
+      }
+    });
+
+    const response = await fetch(
+      `${server.baseUrl}/v1/extension/captures/session_chrome_1/transcript?after_revision=3&wait_ms=7`,
+      { headers: extensionHeaders() }
+    );
+
     expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: 'Voice VAC transcript cursor cannot be newer than revision 2.'
+    });
+    expect(waited).toBe(false);
+  });
+
+  it('aborts the server-side transcript wait when the client abandons a long poll', async () => {
+    let waitStartedResolve!: () => void;
+    let serverAbortResolve!: () => void;
+    const waitStarted = new Promise<void>((resolve) => {
+      waitStartedResolve = resolve;
+    });
+    const serverAbort = new Promise<void>((resolve) => {
+      serverAbortResolve = resolve;
+    });
+    let observedSignal: AbortSignal | undefined;
+    server = await createVoivoxLoopbackServer({
+      token: 'desktop-only-token',
+      extensionToken: 'chrome-bridge-token',
+      extensionCaptureController: {
+        hasCapture: (sessionId: string) => sessionId === 'session_chrome_1',
+        getTranscriptRevision: () => 0,
+        startCapture: () => extensionCaptureSession(),
+        ingestAudio: () => undefined,
+        waitForTranscript: (
+          _sessionId: string,
+          _afterRevision: number,
+          _waitMs: number,
+          signal?: AbortSignal
+        ) => {
+          observedSignal = signal;
+          waitStartedResolve();
+          if (!signal) return Promise.reject(new Error('Missing request-close abort signal.'));
+          return new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => {
+              serverAbortResolve();
+              const error = new Error('Transcript wait was aborted.');
+              error.name = 'AbortError';
+              reject(error);
+            }, { once: true });
+          });
+        },
+        stopCapture: async () => extensionCaptureSession('complete')
+      }
+    });
+
+    const clientAbort = new AbortController();
+    const pending = fetch(
+      `${server.baseUrl}/v1/extension/captures/session_chrome_1/transcript?after_revision=0&wait_ms=25000`,
+      { headers: extensionHeaders(), signal: clientAbort.signal }
+    );
+    const clientRejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    await waitStarted;
+    clientAbort.abort();
+
+    await Promise.all([clientRejected, serverAbort]);
+    expect(observedSignal?.aborted).toBe(true);
+  });
+
+  it('accepts only Chrome-tab capture metadata and bounded even PCM16 bytes', async () => {
+    const starts: unknown[] = [];
+    const audio: Array<{ sequence: number; bytes: number }> = [];
+    server = await createVoivoxLoopbackServer({
+      token: 'desktop-only-token',
+      extensionToken: 'chrome-bridge-token',
+      extensionCaptureController: {
+        hasCapture: (sessionId: string) => sessionId === 'session_chrome_1',
+        getTranscriptRevision: () => 0,
+        startCapture: (request: unknown) => {
+          starts.push(request);
+          return extensionCaptureSession();
+        },
+        ingestAudio: (_sessionId: string, sequence: number, pcm: Uint8Array) => {
+          audio.push({ sequence, bytes: pcm.byteLength });
+        },
+        waitForTranscript: async () => undefined,
+        stopCapture: async () => extensionCaptureSession('complete')
+      }
+    });
+
+    const invalidSource = await fetch(`${server.baseUrl}/v1/extension/captures`, {
+      method: 'POST',
+      headers: extensionHeaders('application/json'),
+      body: JSON.stringify({
+        mode: 'fast',
+        source: { kind: 'macos-process', label: 'Spotify', processId: 42 },
+        tunnelSessionId: 'tunnel-1'
+      })
+    });
+    const missingUrl = await fetch(`${server.baseUrl}/v1/extension/captures`, {
+      method: 'POST',
+      headers: extensionHeaders('application/json'),
+      body: JSON.stringify({
+        mode: 'fast',
+        source: { kind: 'chrome-tab', label: 'Target' },
+        tunnelSessionId: 'tunnel-1'
+      })
+    });
+    const emptyUrl = await fetch(`${server.baseUrl}/v1/extension/captures`, {
+      method: 'POST',
+      headers: extensionHeaders('application/json'),
+      body: JSON.stringify({
+        mode: 'fast',
+        source: { kind: 'chrome-tab', label: 'Target', url: '' },
+        tunnelSessionId: 'tunnel-1'
+      })
+    });
+    const nonHttpUrl = await fetch(`${server.baseUrl}/v1/extension/captures`, {
+      method: 'POST',
+      headers: extensionHeaders('application/json'),
+      body: JSON.stringify({
+        mode: 'fast',
+        source: { kind: 'chrome-tab', label: 'Target', url: 'file:///tmp/video.mp4' },
+        tunnelSessionId: 'tunnel-1'
+      })
+    });
+    const odd = await fetch(
+      `${server.baseUrl}/v1/extension/captures/session_chrome_1/audio/0`,
+      {
+        method: 'POST',
+        headers: extensionHeaders('application/octet-stream'),
+        body: new Uint8Array([0, 1, 2])
+      }
+    );
+    const oversized = await fetch(
+      `${server.baseUrl}/v1/extension/captures/session_chrome_1/audio/0`,
+      {
+        method: 'POST',
+        headers: extensionHeaders('application/octet-stream'),
+        body: new Uint8Array(128 * 1024 + 2)
+      }
+    );
+    const maximum = await fetch(
+      `${server.baseUrl}/v1/extension/captures/session_chrome_1/audio/0`,
+      {
+        method: 'POST',
+        headers: extensionHeaders('application/octet-stream'),
+        body: new Uint8Array(128 * 1024)
+      }
+    );
+
+    expect(invalidSource.status).toBe(400);
+    expect(missingUrl.status).toBe(400);
+    expect(emptyUrl.status).toBe(400);
+    expect(nonHttpUrl.status).toBe(400);
+    expect(odd.status).toBe(400);
+    expect(oversized.status).toBe(400);
+    expect(maximum.status).toBe(204);
+    expect(starts).toEqual([]);
+    expect(audio).toEqual([{ sequence: 0, bytes: 128 * 1024 }]);
+  });
+
+  it('does not let a wrong origin, token, or capture session mutate extension PCM', async () => {
+    const mutations: string[] = [];
+    server = await createVoivoxLoopbackServer({
+      token: 'desktop-only-token',
+      extensionToken: 'chrome-bridge-token',
+      extensionCaptureController: {
+        hasCapture: () => false,
+        getTranscriptRevision: () => 0,
+        startCapture: () => {
+          mutations.push('start');
+          return extensionCaptureSession();
+        },
+        ingestAudio: () => mutations.push('audio'),
+        waitForTranscript: async () => {
+          mutations.push('transcript');
+          return undefined;
+        },
+        stopCapture: async () => {
+          mutations.push('stop');
+          return extensionCaptureSession('complete');
+        }
+      }
+    });
+    const body = JSON.stringify({
+      mode: 'quality',
+      source: {
+        kind: 'chrome-tab',
+        label: 'Target',
+        url: 'https://example.test/target'
+      },
+      tunnelSessionId: 'tunnel-1'
+    });
+
+    const wrongOrigin = await fetch(`${server.baseUrl}/v1/extension/captures`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer chrome-bridge-token',
+        'content-type': 'application/json',
+        origin: 'chrome-extension://not-voice-vac'
+      },
+      body
+    });
+    const wrongToken = await fetch(`${server.baseUrl}/v1/extension/captures`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer desktop-only-token',
+        'content-type': 'application/json',
+        origin: VOIVOX_EXTENSION_ORIGIN
+      },
+      body
+    });
+    const wrongSession = await fetch(
+      `${server.baseUrl}/v1/extension/captures/foreign-session/audio/0`,
+      {
+        method: 'POST',
+        headers: extensionHeaders('application/octet-stream'),
+        body: new Uint8Array([0, 0])
+      }
+    );
+
+    expect(wrongOrigin.status).toBe(403);
+    expect(wrongToken.status).toBe(401);
+    expect(wrongSession.status).toBe(404);
+    expect(mutations).toEqual([]);
   });
 
   it('flushes the local ASR pipeline before a capture is marked complete', async () => {
@@ -597,7 +910,7 @@ describe('Voice Vac loopback API', () => {
       extensionToken: 'restricted-extension-token'
     });
 
-    const allowed = await fetch(`${server.baseUrl}/v1/extension/transcripts`, {
+    const allowed = await fetch(`${server.baseUrl}/v1/extension/captures`, {
       method: 'OPTIONS',
       headers: {
         origin: VOIVOX_EXTENSION_ORIGIN,
@@ -610,7 +923,7 @@ describe('Voice Vac loopback API', () => {
     expect(allowed.headers.get('access-control-allow-methods')).toContain('POST');
     expect(allowed.headers.get('access-control-allow-headers')).toContain('authorization');
 
-    const denied = await fetch(`${server.baseUrl}/v1/extension/transcripts`, {
+    const denied = await fetch(`${server.baseUrl}/v1/extension/captures`, {
       method: 'OPTIONS',
       headers: {
         origin: 'chrome-extension://not-voivox',
@@ -623,10 +936,18 @@ describe('Voice Vac loopback API', () => {
   it('rejects oversized JSON before parsing or storing it', async () => {
     server = await createVoivoxLoopbackServer({
       token: 'desktop-only-token',
-      extensionToken: 'restricted-extension-token'
+      extensionToken: 'restricted-extension-token',
+      extensionCaptureController: {
+        hasCapture: () => false,
+        getTranscriptRevision: () => 0,
+        startCapture: () => extensionCaptureSession(),
+        ingestAudio: () => undefined,
+        waitForTranscript: async () => undefined,
+        stopCapture: async () => extensionCaptureSession('complete')
+      }
     });
 
-    const response = await fetch(`${server.baseUrl}/v1/extension/transcripts`, {
+    const response = await fetch(`${server.baseUrl}/v1/extension/captures`, {
       method: 'POST',
       headers: {
         authorization: 'Bearer restricted-extension-token',
@@ -634,9 +955,9 @@ describe('Voice Vac loopback API', () => {
         origin: VOIVOX_EXTENSION_ORIGIN
       },
       body: JSON.stringify({
-        durationMs: 1_000,
-        source: { kind: 'chrome-tab', label: 'Oversized tab' },
-        transcript: 'x'.repeat(1_600_000)
+        mode: 'quality',
+        source: { kind: 'chrome-tab', label: 'x'.repeat(1_600_000) },
+        tunnelSessionId: 'tunnel-1'
       })
     });
 
@@ -734,4 +1055,25 @@ async function reserveAvailablePort(): Promise<number> {
     probe.close((error) => error ? reject(error) : resolve());
   });
   return address.port;
+}
+
+function extensionHeaders(contentType = 'application/json'): Record<string, string> {
+  return {
+    authorization: 'Bearer chrome-bridge-token',
+    'content-type': contentType,
+    origin: VOIVOX_EXTENSION_ORIGIN
+  };
+}
+
+function extensionCaptureSession(status: 'capturing' | 'complete' = 'capturing') {
+  return {
+    id: 'session_chrome_1',
+    revision: status === 'complete' ? 1 : 0,
+    source: { kind: 'chrome-tab' as const, label: 'Current tab' },
+    status,
+    createdAt: '2026-07-20T00:00:00.000Z',
+    ...(status === 'complete' ? { stoppedAt: '2026-07-20T00:00:01.000Z' } : {}),
+    rawSegments: [],
+    derivedTranscripts: []
+  };
 }

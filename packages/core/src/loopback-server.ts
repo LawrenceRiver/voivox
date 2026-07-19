@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import {
   type ActiveVideoTranscriptionOptions,
   type CaptureSession,
+  type TranscriptDelta,
   VoivoxService
 } from './voivox-service.js';
 import {
@@ -24,6 +25,8 @@ const MCP_PROOF_PATH = '/v1/mcp/proof';
 const MCP_PROOF_PROTOCOL_VERSION = 1;
 const MCP_PROOF_CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
 const MAXIMUM_JSON_BODY_BYTES = 1_500_000;
+const MAXIMUM_PCM_CHUNK_BYTES = 128 * 1024;
+const MAXIMUM_TRANSCRIPT_WAIT_MS = 25_000;
 
 export type LocalAsrStatus = 'checking' | 'ready' | 'missing';
 
@@ -45,6 +48,33 @@ export type MacAudioProcess = {
 
 export type ActiveVideoTranscriptionRequest = ActiveVideoTranscriptionOptions;
 
+export type ExtensionCaptureStartRequest = Readonly<{
+  jobId?: string;
+  mode: 'fast' | 'quality';
+  source: Readonly<{
+    kind: 'chrome-tab';
+    label: string;
+    language?: string;
+    title?: string;
+    url: string;
+  }>;
+  tunnelSessionId: string;
+}>;
+
+export type ExtensionCaptureControllerPort = {
+  getTranscriptRevision(sessionId: string): number;
+  hasCapture(sessionId: string): boolean;
+  ingestAudio(sessionId: string, sequence: number, pcm: Uint8Array): void;
+  startCapture(request: ExtensionCaptureStartRequest): CaptureSession;
+  stopCapture(sessionId: string): Promise<CaptureSession>;
+  waitForTranscript(
+    sessionId: string,
+    afterRevision: number,
+    waitMs: number,
+    signal?: AbortSignal
+  ): Promise<TranscriptDelta | undefined>;
+};
+
 export async function createVoivoxLoopbackServer(options: {
   token: string;
   port?: number;
@@ -57,6 +87,7 @@ export async function createVoivoxLoopbackServer(options: {
   onActiveVideoTranscription?: (
     request: ActiveVideoTranscriptionRequest
   ) => Promise<TranscriptResult | undefined>;
+  extensionCaptureController?: ExtensionCaptureControllerPort;
   tunnelSessions?: CrossWindowSessionStore;
 }): Promise<VoivoxLoopbackServer> {
   const service = options.service ?? new VoivoxService();
@@ -157,26 +188,13 @@ export async function createVoivoxLoopbackServer(options: {
           return;
         }
 
-        if (request.method === 'POST' && request.url === '/v1/extension/transcripts') {
-          const body = await readJson(request);
-          if (!isBrowserTranscriptImport(body)) {
-            sendJson(response, 400, {
-              error: 'Voice Vac browser transcript import requires a Chrome tab, local text, and a duration up to 10 minutes.'
-            });
-            return;
-          }
-
-          sendJson(
-            response,
-            201,
-            service.importCompletedCapture(
-              body.source,
-              [{ startMs: 0, endMs: body.durationMs, text: body.transcript }],
-              'live_tunnel'
-            )
-          );
-          return;
-        }
+        const extensionCaptureResponse = await handleExtensionCaptureRequest(
+          request,
+          response,
+          requestUrl,
+          options.extensionCaptureController
+        );
+        if (extensionCaptureResponse) return;
 
         const extensionTunnelResponse = await handleTunnelSessionRequest(request, response, tunnelSessions, true);
         if (extensionTunnelResponse) return;
@@ -395,6 +413,164 @@ function applyExtensionCors(response: ServerResponse): void {
   response.setHeader('vary', 'Origin');
 }
 
+async function handleExtensionCaptureRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  requestUrl: URL | undefined,
+  controller: ExtensionCaptureControllerPort | undefined
+): Promise<boolean> {
+  const prefix = '/v1/extension/captures';
+  if (!requestUrl?.pathname.startsWith(prefix) || !controller) return false;
+
+  if (request.method === 'POST' && requestUrl.pathname === prefix && requestUrl.search === '') {
+    const body = await readJson(request);
+    if (!isExtensionCaptureStartRequest(body)) {
+      sendJson(response, 400, {
+        error: 'Voice VAC extension capture requires one armed Chrome tab and tunnel session.'
+      });
+      return true;
+    }
+    sendJson(response, 201, controller.startCapture(body));
+    return true;
+  }
+
+  const audioMatch = requestUrl.pathname.match(
+    /^\/v1\/extension\/captures\/([^/]+)\/audio\/(0|[1-9]\d*)$/u
+  );
+  if (request.method === 'POST' && audioMatch && requestUrl.search === '') {
+    const sessionId = decodeURIComponent(audioMatch[1]!);
+    if (!controller.hasCapture(sessionId)) {
+      sendJson(response, 404, { error: 'Voice VAC extension capture was not found.' });
+      return true;
+    }
+    const sequence = Number(audioMatch[2]);
+    if (!Number.isSafeInteger(sequence)) {
+      sendJson(response, 400, { error: 'Voice VAC audio sequence must be a nonnegative integer.' });
+      return true;
+    }
+    const contentType = request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase();
+    if (contentType !== 'application/octet-stream') {
+      sendJson(response, 400, { error: 'Voice VAC extension audio requires application/octet-stream.' });
+      return true;
+    }
+    const pcm = await readPcm16(request);
+    controller.ingestAudio(sessionId, sequence, pcm);
+    response.writeHead(204);
+    response.end();
+    return true;
+  }
+
+  const transcriptMatch = requestUrl.pathname.match(
+    /^\/v1\/extension\/captures\/([^/]+)\/transcript$/u
+  );
+  if (request.method === 'GET' && transcriptMatch) {
+    const sessionId = decodeURIComponent(transcriptMatch[1]!);
+    if (!controller.hasCapture(sessionId)) {
+      sendJson(response, 404, { error: 'Voice VAC extension capture was not found.' });
+      return true;
+    }
+    const query = parseExtensionTranscriptQuery(requestUrl);
+    if (!query) {
+      sendJson(response, 400, {
+        error: 'Voice VAC transcript polling requires after_revision and an optional wait_ms up to 25000.'
+      });
+      return true;
+    }
+    const currentRevision = controller.getTranscriptRevision(sessionId);
+    if (query.afterRevision > currentRevision) {
+      sendJson(response, 400, {
+        error: `Voice VAC transcript cursor cannot be newer than revision ${currentRevision}.`
+      });
+      return true;
+    }
+
+    const abortController = new AbortController();
+    const abortWait = () => abortController.abort();
+    request.once('aborted', abortWait);
+    response.once('close', abortWait);
+    if (request.aborted || response.destroyed) abortWait();
+    let delta: TranscriptDelta | undefined;
+    try {
+      delta = await controller.waitForTranscript(
+        sessionId,
+        query.afterRevision,
+        query.waitMs,
+        abortController.signal
+      );
+    } catch (error) {
+      if (abortController.signal.aborted && isAbortError(error)) return true;
+      throw error;
+    } finally {
+      request.off('aborted', abortWait);
+      response.off('close', abortWait);
+    }
+    if (abortController.signal.aborted) return true;
+    if (!delta) {
+      response.writeHead(204);
+      response.end();
+      return true;
+    }
+    sendJson(response, 200, delta);
+    return true;
+  }
+
+  const stopMatch = requestUrl.pathname.match(
+    /^\/v1\/extension\/captures\/([^/]+)\/stop$/u
+  );
+  if (request.method === 'POST' && stopMatch && requestUrl.search === '') {
+    const sessionId = decodeURIComponent(stopMatch[1]!);
+    if (!controller.hasCapture(sessionId)) {
+      sendJson(response, 404, { error: 'Voice VAC extension capture was not found.' });
+      return true;
+    }
+    sendJson(response, 200, await controller.stopCapture(sessionId));
+    return true;
+  }
+
+  sendJson(response, 404, { error: 'Unknown Voice VAC extension capture endpoint.' });
+  return true;
+}
+
+function parseExtensionTranscriptQuery(url: URL): {
+  afterRevision: number;
+  waitMs: number;
+} | undefined {
+  const entries = [...url.searchParams.entries()];
+  if (
+    entries.length < 1
+    || entries.length > 2
+    || entries.some(([key]) => key !== 'after_revision' && key !== 'wait_ms')
+    || url.searchParams.getAll('after_revision').length !== 1
+    || url.searchParams.getAll('wait_ms').length > 1
+  ) {
+    return undefined;
+  }
+  const afterRevision = parseCanonicalInteger(url.searchParams.get('after_revision'));
+  const waitValue = url.searchParams.get('wait_ms');
+  const waitMs = waitValue === null
+    ? MAXIMUM_TRANSCRIPT_WAIT_MS
+    : parseCanonicalInteger(waitValue);
+  if (
+    afterRevision === undefined
+    || waitMs === undefined
+    || waitMs < 1
+    || waitMs > MAXIMUM_TRANSCRIPT_WAIT_MS
+  ) {
+    return undefined;
+  }
+  return { afterRevision, waitMs };
+}
+
+function parseCanonicalInteger(value: string | null): number | undefined {
+  if (value === null || !/^(0|[1-9]\d*)$/u.test(value)) return undefined;
+  const number = Number(value);
+  return Number.isSafeInteger(number) ? number : undefined;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
 async function handleTunnelSessionRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -468,6 +644,7 @@ function isTunnelCreateRequest(value: Record<string, unknown>): value is { tabId
     && typeof value.documentId === 'string' && value.documentId.length > 0 && value.documentId.trim() === value.documentId
     && typeof value.dropToken === 'string'
     && /^VOICE_VAC_DROP_V1\|[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\|[A-Za-z0-9_-]{43}$/iu.test(value.dropToken)
+    && isCanonicalHttpUrl(value.url)
     && hasValidTunnelMutableFields(value);
 }
 
@@ -481,7 +658,7 @@ function hasValidTunnelMutableFields(value: Record<string, unknown>): boolean {
   if (value.state !== undefined && !['idle', 'dragging', 'detecting', 'ready', 'transcribing', 'paused', 'completed', 'error'].includes(String(value.state))) return false;
   if (value.errorCode !== undefined && !VOICE_VAC_ERROR_CODES.includes(value.errorCode as never)) return false;
   if (value.title !== undefined && (typeof value.title !== 'string' || value.title.length > 500)) return false;
-  if (value.url !== undefined && (typeof value.url !== 'string' || value.url.length > 4_000)) return false;
+  if (value.url !== undefined && !isCanonicalHttpUrl(value.url)) return false;
   if (value.appEndpoint !== undefined && !isTunnelPoint(value.appEndpoint)) return false;
   if (value.pageEndpoint !== undefined && !isTunnelPoint(value.pageEndpoint)) return false;
   if (value.targetRect !== undefined && !isTunnelRect(value.targetRect)) return false;
@@ -510,6 +687,52 @@ function isTunnelRect(value: unknown): value is { x: number; y: number; width: n
 
 function isAuthorized(request: IncomingMessage, token: string): boolean {
   return request.headers.authorization === `Bearer ${token}`;
+}
+
+function isExtensionCaptureStartRequest(
+  value: Record<string, unknown>
+): value is ExtensionCaptureStartRequest {
+  if (!hasOnlyKeys(value, new Set(['jobId', 'mode', 'source', 'tunnelSessionId']))) {
+    return false;
+  }
+  if (!value.source || typeof value.source !== 'object' || Array.isArray(value.source)) {
+    return false;
+  }
+  const source = value.source as Record<string, unknown>;
+  return hasOnlyKeys(source, new Set(['kind', 'label', 'language', 'title', 'url']))
+    && source.kind === 'chrome-tab'
+    && isBoundedNonemptyString(source.label, 500)
+    && (source.language === undefined || isBoundedNonemptyString(source.language, 40))
+    && (source.title === undefined || isBoundedString(source.title, 500))
+    && isCanonicalHttpUrl(source.url)
+    && (value.mode === 'fast' || value.mode === 'quality')
+    && isBoundedNonemptyString(value.tunnelSessionId, 500)
+    && (value.jobId === undefined || isBoundedNonemptyString(value.jobId, 500));
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
+  return Object.keys(value).every((key) => allowed.has(key));
+}
+
+function isBoundedNonemptyString(value: unknown, maximumLength: number): value is string {
+  return typeof value === 'string'
+    && value.length > 0
+    && value.length <= maximumLength
+    && value.trim() === value;
+}
+
+function isBoundedString(value: unknown, maximumLength: number): value is string {
+  return typeof value === 'string' && value.length <= maximumLength;
+}
+
+function isCanonicalHttpUrl(value: unknown): value is string {
+  if (!isBoundedNonemptyString(value, 4_000)) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 function isCaptureSource(value: unknown): value is {
@@ -598,34 +821,6 @@ function isDerivedTranscript(value: unknown): value is {
   );
 }
 
-function isBrowserTranscriptImport(value: unknown): value is {
-  source: { kind: 'chrome-tab'; label: string; title?: string; url?: string };
-  durationMs: number;
-  transcript: string;
-} {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  const body = value as {
-    source?: unknown;
-    durationMs?: unknown;
-    transcript?: unknown;
-  };
-  return (
-    isCaptureSource(body.source) &&
-    body.source.kind === 'chrome-tab' &&
-    body.source.label.length <= 200 &&
-    typeof body.durationMs === 'number' &&
-    Number.isInteger(body.durationMs) &&
-    body.durationMs >= 0 &&
-    body.durationMs <= 600_000 &&
-    typeof body.transcript === 'string' &&
-    body.transcript.trim().length > 0 &&
-    body.transcript.length <= 200_000
-  );
-}
-
 function formatRawTranscript(
   segments: Array<{ startMs: number; endMs: number; text: string }>
 ): string {
@@ -674,6 +869,36 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
   }
 
   return parsed as Record<string, unknown>;
+}
+
+async function readPcm16(request: IncomingMessage): Promise<Uint8Array> {
+  const declaredLength = Number(request.headers['content-length']);
+  if (
+    Number.isFinite(declaredLength)
+    && (declaredLength <= 0 || declaredLength > MAXIMUM_PCM_CHUNK_BYTES)
+  ) {
+    throw new RequestBodyError('Voice VAC PCM16 request body must be between 1 byte and 128 KiB.');
+  }
+  const chunks: Uint8Array[] = [];
+  let bodyBytes = 0;
+  for await (const chunk of request) {
+    const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : new Uint8Array(chunk);
+    bodyBytes += bytes.byteLength;
+    if (bodyBytes > MAXIMUM_PCM_CHUNK_BYTES) {
+      throw new RequestBodyError('Voice VAC PCM16 request body must not exceed 128 KiB.');
+    }
+    chunks.push(bytes);
+  }
+  if (bodyBytes === 0 || bodyBytes % 2 !== 0) {
+    throw new RequestBodyError('Voice VAC PCM16 request body must contain complete signed 16-bit samples.');
+  }
+  const pcm = new Uint8Array(bodyBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    pcm.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return pcm;
 }
 
 class RequestBodyError extends Error {}
