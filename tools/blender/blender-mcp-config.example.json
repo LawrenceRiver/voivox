@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "blender": {
+      "command": "/absolute/path/to/voivox-workspace/tools/blender/.venv313/bin/blender-mcp-server"
+    }
+  }
+}
