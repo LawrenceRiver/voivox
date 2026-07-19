@@ -36,11 +36,9 @@ public struct OverlayLayoutEngine: Sendable {
             width: metrics.nozzleHitSize.width,
             height: metrics.nozzleHitSize.height
         )
-        let transcriptFrame = CGRect(
-            x: capsuleFrame.maxX - metrics.transcriptSize.width,
-            y: capsuleFrame.maxY + metrics.transcriptGap,
-            width: metrics.transcriptSize.width,
-            height: metrics.transcriptSize.height
+        let transcriptFrame = makeTranscriptFrame(
+            capsuleFrame: capsuleFrame,
+            visibleFrame: capsuleScreen.visibleFrame
         )
 
         return OverlayLayout(
@@ -98,6 +96,43 @@ public struct OverlayLayoutEngine: Sendable {
             x: minimumX + clampedUnit(normalizedOrigin.x) * horizontalTravel,
             y: minimumY + clampedUnit(normalizedOrigin.y) * verticalTravel
         )
+    }
+
+    private func makeTranscriptFrame(
+        capsuleFrame: CGRect,
+        visibleFrame: CGRect
+    ) -> CGRect {
+        let minimumX = visibleFrame.minX + metrics.edgeInset
+        let maximumX = visibleFrame.maxX - metrics.edgeInset - metrics.transcriptSize.width
+        let minimumY = visibleFrame.minY + metrics.edgeInset
+        let maximumY = visibleFrame.maxY - metrics.edgeInset - metrics.transcriptSize.height
+        let x = clamped(
+            capsuleFrame.maxX - metrics.transcriptSize.width,
+            lowerBound: minimumX,
+            upperBound: maximumX
+        )
+        let aboveY = capsuleFrame.maxY + metrics.transcriptGap
+        let belowY = capsuleFrame.minY - metrics.transcriptGap - metrics.transcriptSize.height
+        let y: CGFloat
+
+        if aboveY <= maximumY {
+            y = aboveY
+        } else if belowY >= minimumY {
+            y = belowY
+        } else {
+            y = clamped(aboveY, lowerBound: minimumY, upperBound: maximumY)
+        }
+
+        return CGRect(origin: CGPoint(x: x, y: y), size: metrics.transcriptSize)
+    }
+
+    private func clamped(
+        _ value: CGFloat,
+        lowerBound: CGFloat,
+        upperBound: CGFloat
+    ) -> CGFloat {
+        guard upperBound >= lowerBound else { return lowerBound }
+        return min(max(value, lowerBound), upperBound)
     }
 
     private func clampedUnit(_ value: CGFloat) -> CGFloat {

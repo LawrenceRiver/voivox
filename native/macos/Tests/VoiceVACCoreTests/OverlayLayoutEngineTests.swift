@@ -129,6 +129,43 @@ struct OverlayLayoutEngineTests {
         #expect(oneXLayout.capsuleFrame == twoXLayout.capsuleFrame)
     }
 
+    @Test("transcript moves below a top-docked capsule on the same screen")
+    func transcriptMovesBelowTopCapsule() {
+        let screen = screen(
+            id: 4,
+            frame: CGRect(x: -1200, y: 80, width: 1200, height: 800)
+        )
+        let layout = OverlayLayoutEngine().makeLayout(
+            screens: [screen],
+            preferredScreenID: nil,
+            savedPlacement: CapsulePlacement(
+                screenID: screen.id,
+                normalizedOrigin: CGPoint(x: 0.5, y: 1)
+            )
+        )
+
+        #expect(layout.transcriptFrame.maxY == layout.capsuleFrame.minY - 12)
+        #expect(screen.visibleFrame.contains(layout.transcriptFrame))
+    }
+
+    @Test("transcript is clamped inside a constrained visible frame")
+    func transcriptClampsToVisibleFrame() {
+        let screen = screen(
+            id: 5,
+            frame: CGRect(x: 0, y: 50, width: 900, height: 180)
+        )
+        let layout = OverlayLayoutEngine().makeLayout(
+            screens: [screen],
+            preferredScreenID: nil,
+            savedPlacement: CapsulePlacement(
+                screenID: screen.id,
+                normalizedOrigin: CGPoint(x: 0.5, y: 0.5)
+            )
+        )
+
+        #expect(screen.visibleFrame.contains(layout.transcriptFrame))
+    }
+
     @Test("phase-one overlay metrics remain exact")
     func exactMetrics() {
         #expect(OverlayMetrics.phaseOne.capsuleSize == CGSize(width: 406, height: 116))

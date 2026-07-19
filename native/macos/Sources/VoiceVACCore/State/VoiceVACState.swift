@@ -71,10 +71,68 @@ public struct VideoTarget: Codable, Equatable, Sendable {
         self.canDirectPlay = canDirectPlay
     }
 
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        kind = try container.decode(Kind.self, forKey: .kind)
+        tag = try container.decodeIfPresent(Tag.self, forKey: .tag)
+        frameID = try container.decode(Int.self, forKey: .frameID)
+        documentID = try container.decode(String.self, forKey: .documentID)
+        viewportRect = try container.decode(BrowserRectDTO.self, forKey: .viewportRect).cgRect
+        screenRect = try container.decode(BrowserRectDTO.self, forKey: .screenRect).cgRect
+        activationPoint = try container.decode(BrowserPointDTO.self, forKey: .activationPoint).cgPoint
+        canDirectPlay = try container.decode(Bool.self, forKey: .canDirectPlay)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(kind, forKey: .kind)
+        try container.encodeIfPresent(tag, forKey: .tag)
+        try container.encode(frameID, forKey: .frameID)
+        try container.encode(documentID, forKey: .documentID)
+        try container.encode(BrowserRectDTO(viewportRect), forKey: .viewportRect)
+        try container.encode(BrowserRectDTO(screenRect), forKey: .screenRect)
+        try container.encode(BrowserPointDTO(activationPoint), forKey: .activationPoint)
+        try container.encode(canDirectPlay, forKey: .canDirectPlay)
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id, kind, tag, viewportRect, screenRect, activationPoint, canDirectPlay
         case frameID = "frameId"
         case documentID = "documentId"
+    }
+}
+
+private struct BrowserRectDTO: Codable {
+    let x: CGFloat
+    let y: CGFloat
+    let width: CGFloat
+    let height: CGFloat
+
+    init(_ rect: CGRect) {
+        x = rect.origin.x
+        y = rect.origin.y
+        width = rect.size.width
+        height = rect.size.height
+    }
+
+    var cgRect: CGRect {
+        CGRect(x: x, y: y, width: width, height: height)
+    }
+}
+
+private struct BrowserPointDTO: Codable {
+    let x: CGFloat
+    let y: CGFloat
+
+    init(_ point: CGPoint) {
+        x = point.x
+        y = point.y
+    }
+
+    var cgPoint: CGPoint {
+        CGPoint(x: x, y: y)
     }
 }
 
@@ -105,6 +163,7 @@ public struct VoiceVACState: Codable, Equatable, Sendable {
 public enum VoiceVACAction: Equatable, Sendable {
     case beginNozzleDrag(at: CGPoint)
     case moveNozzle(to: CGPoint)
+    case targetDetected(VideoTarget)
     case targetResolved(VideoTarget)
     case targetRejected(VoiceVACFailure)
     case primaryButtonPressed

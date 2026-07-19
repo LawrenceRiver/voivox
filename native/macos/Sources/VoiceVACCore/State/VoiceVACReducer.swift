@@ -16,10 +16,19 @@ public enum VoiceVACReducer {
         case let .moveNozzle(point):
             next.nozzleGlobalPoint = point
 
+        case let .targetDetected(target):
+            if next.phase == .dragging {
+                next.phase = target.kind == .tabAudio ? .tabAudioOnly : .targetDetected
+                next.target = target
+                next.failure = nil
+            }
+
         case let .targetResolved(target):
-            next.phase = target.kind == .tabAudio ? .tabAudioOnly : .ready
-            next.target = target
-            next.failure = nil
+            if next.phase == .targetDetected || next.phase == .tabAudioOnly {
+                next.phase = .ready
+                next.target = target
+                next.failure = nil
+            }
 
         case let .targetRejected(failure):
             next.phase = .warningYellow
@@ -48,14 +57,18 @@ public enum VoiceVACReducer {
             next.transcriptPreview = preview
 
         case .captureCompleted:
-            next.phase = .completed
+            if next.phase == .transcribing || next.phase == .paused {
+                next.phase = .completed
+            }
 
         case .retractRequested:
             next.phase = .retracting
             effects = [.stopAndFlush, .beginRetraction]
 
         case .retractionCompleted:
-            next = .idle
+            if next.phase == .retracting {
+                next = .idle
+            }
         }
 
         return VoiceVACTransition(state: next, effects: effects)

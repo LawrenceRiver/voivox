@@ -1,9 +1,55 @@
 import CoreGraphics
+import Foundation
 import Testing
 @testable import VoiceVACCore
 
 @Suite("Voice VAC state transitions")
 struct VoiceVACReducerTests {
+    @Test("video targets round-trip the exact Chrome geometry JSON shape")
+    func videoTargetChromeJSONRoundTrip() throws {
+        let json = Data(#"""
+        {
+          "id": "target-A",
+          "kind": "html-media",
+          "tag": "video",
+          "frameId": 0,
+          "documentId": "document-A",
+          "viewportRect": {"x": 100, "y": 120, "width": 640, "height": 360},
+          "screenRect": {"x": 300, "y": 220, "width": 640, "height": 360},
+          "activationPoint": {"x": 420, "y": 280},
+          "canDirectPlay": true
+        }
+        """#.utf8)
+
+        let target = try JSONDecoder().decode(VideoTarget.self, from: json)
+        #expect(target == .fixture)
+
+        let encoded = try JSONEncoder().encode(target)
+        let object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        let viewportRect = try #require(object["viewportRect"] as? [String: Any])
+        let screenRect = try #require(object["screenRect"] as? [String: Any])
+        let activationPoint = try #require(object["activationPoint"] as? [String: Any])
+
+        #expect(Set(object.keys) == [
+            "id", "kind", "tag", "frameId", "documentId", "viewportRect",
+            "screenRect", "activationPoint", "canDirectPlay"
+        ])
+        #expect(viewportRect.keys.sorted() == ["height", "width", "x", "y"])
+        #expect(viewportRect["x"] as? Double == 100)
+        #expect(viewportRect["y"] as? Double == 120)
+        #expect(viewportRect["width"] as? Double == 640)
+        #expect(viewportRect["height"] as? Double == 360)
+        #expect(screenRect["x"] as? Double == 300)
+        #expect(screenRect["y"] as? Double == 220)
+        #expect(screenRect["width"] as? Double == 640)
+        #expect(screenRect["height"] as? Double == 360)
+        #expect(activationPoint.keys.sorted() == ["x", "y"])
+        #expect(activationPoint["x"] as? Double == 420)
+        #expect(activationPoint["y"] as? Double == 280)
+    }
+
     @Test("a rejected target stays deployed and never begins retraction")
     func rejectedTargetStaysDeployed() {
         let deployed = VoiceVACState(
@@ -26,23 +72,64 @@ struct VoiceVACReducerTests {
         #expect(!transition.effects.contains(.beginRetraction))
     }
 
-    @Test("ready requires a physical primary press before capture")
-    func readyGatesCapture() {
+    @Test("an HTML target must be detected and resolved before capture")
+    func htmlTargetRequiresReadiness() {
         let target = VideoTarget.fixture
-        let readyTransition = VoiceVACReducer.reduce(
+        let dragging = VoiceVACReducer.reduce(
             state: .idle,
+            action: .beginNozzleDrag(at: CGPoint(x: 240, y: 180))
+        )
+        let detected = VoiceVACReducer.reduce(
+            state: dragging.state,
+            action: .targetDetected(target)
+        )
+        #expect(detected.state.phase == .targetDetected)
+        #expect(detected.state.target == target)
+        #expect(detected.effects.isEmpty)
+
+        let prematurePress = VoiceVACReducer.reduce(
+            state: detected.state,
+            action: .primaryButtonPressed
+        )
+        #expect(prematurePress.state.phase == .targetDetected)
+        #expect(prematurePress.effects.isEmpty)
+
+        let ready = VoiceVACReducer.reduce(
+            state: prematurePress.state,
             action: .targetResolved(target)
         )
-        #expect(readyTransition.state.phase == .ready)
-        #expect(readyTransition.state.target == target)
-        #expect(readyTransition.effects.isEmpty)
+        #expect(ready.state.phase == .ready)
+        #expect(ready.state.target == target)
+        #expect(ready.effects.isEmpty)
 
         let started = VoiceVACReducer.reduce(
-            state: readyTransition.state,
+            state: ready.state,
             action: .primaryButtonPressed
         )
         #expect(started.state.phase == .transcribing)
         #expect(started.effects == [.startCapture(target)])
+    }
+
+    @Test("target detection cannot bypass nozzle dragging")
+    func targetDetectionCannotBypassDragging() {
+        let transition = VoiceVACReducer.reduce(
+            state: .idle,
+            action: .targetDetected(.fixture)
+        )
+
+        #expect(transition.state == .idle)
+        #expect(transition.effects.isEmpty)
+    }
+
+    @Test("target resolution cannot bypass the detection phase")
+    func targetResolutionCannotBypassDetection() {
+        let transition = VoiceVACReducer.reduce(
+            state: .idle,
+            action: .targetResolved(.fixture)
+        )
+
+        #expect(transition.state == .idle)
+        #expect(transition.effects.isEmpty)
     }
 
     @Test("primary button pauses and resumes an active capture")
@@ -85,18 +172,43 @@ struct VoiceVACReducerTests {
         #expect(moved.state.nozzleGlobalPoint == CGPoint(x: 120, y: 320))
     }
 
-    @Test("tab audio targets remain explicitly identified")
-    func tabAudioTargetUsesDedicatedPhase() {
+    @Test("a tab-audio target must be detected and resolved before capture")
+    func tabAudioTargetRequiresReadiness() {
         let tabAudioTarget = VideoTarget.fixture(kind: .tabAudio, canDirectPlay: false)
-
-        let transition = VoiceVACReducer.reduce(
+        let dragging = VoiceVACReducer.reduce(
             state: .idle,
-            action: .targetResolved(tabAudioTarget)
+            action: .beginNozzleDrag(at: CGPoint(x: 240, y: 180))
         )
 
-        #expect(transition.state.phase == .tabAudioOnly)
-        #expect(transition.state.target == tabAudioTarget)
-        #expect(transition.effects.isEmpty)
+        let detected = VoiceVACReducer.reduce(
+            state: dragging.state,
+            action: .targetDetected(tabAudioTarget)
+        )
+        #expect(detected.state.phase == .tabAudioOnly)
+        #expect(detected.state.target == tabAudioTarget)
+        #expect(detected.effects.isEmpty)
+
+        let prematurePress = VoiceVACReducer.reduce(
+            state: detected.state,
+            action: .primaryButtonPressed
+        )
+        #expect(prematurePress.state.phase == .tabAudioOnly)
+        #expect(prematurePress.effects.isEmpty)
+
+        let ready = VoiceVACReducer.reduce(
+            state: prematurePress.state,
+            action: .targetResolved(tabAudioTarget)
+        )
+        #expect(ready.state.phase == .ready)
+        #expect(ready.state.target == tabAudioTarget)
+        #expect(ready.effects.isEmpty)
+
+        let started = VoiceVACReducer.reduce(
+            state: ready.state,
+            action: .primaryButtonPressed
+        )
+        #expect(started.state.phase == .transcribing)
+        #expect(started.effects == [.startCapture(tabAudioTarget)])
     }
 
     @Test("transcript completion and retraction update lifecycle state")
@@ -136,6 +248,57 @@ struct VoiceVACReducerTests {
         #expect(idle.effects.isEmpty)
     }
 
+    @Test(
+        "capture completion only terminates an active or paused capture",
+        arguments: VoiceVACPhase.everyCase
+    )
+    func captureCompletionIsPhaseGuarded(phase: VoiceVACPhase) {
+        let state = VoiceVACState(
+            phase: phase,
+            nozzleGlobalPoint: CGPoint(x: 400, y: 300),
+            target: .fixture,
+            transcriptPreview: "new session"
+        )
+
+        let transition = VoiceVACReducer.reduce(
+            state: state,
+            action: .captureCompleted
+        )
+
+        if phase == .transcribing || phase == .paused {
+            #expect(transition.state.phase == .completed)
+            #expect(transition.state.target == state.target)
+        } else {
+            #expect(transition.state == state)
+        }
+        #expect(transition.effects.isEmpty)
+    }
+
+    @Test(
+        "retraction completion only clears a currently retracting session",
+        arguments: VoiceVACPhase.everyCase
+    )
+    func retractionCompletionIsPhaseGuarded(phase: VoiceVACPhase) {
+        let state = VoiceVACState(
+            phase: phase,
+            nozzleGlobalPoint: CGPoint(x: 400, y: 300),
+            target: .fixture,
+            transcriptPreview: "new session"
+        )
+
+        let transition = VoiceVACReducer.reduce(
+            state: state,
+            action: .retractionCompleted
+        )
+
+        if phase == .retracting {
+            #expect(transition.state == .idle)
+        } else {
+            #expect(transition.state == state)
+        }
+        #expect(transition.effects.isEmpty)
+    }
+
     @Test("non-retraction actions never stop and retract")
     func onlyRetractRequestProducesRetractionEffects() {
         let target = VideoTarget.fixture
@@ -143,6 +306,7 @@ struct VoiceVACReducerTests {
         let actions: [VoiceVACAction] = [
             .beginNozzleDrag(at: .zero),
             .moveNozzle(to: CGPoint(x: 1, y: 2)),
+            .targetDetected(target),
             .targetResolved(target),
             .targetRejected(failure),
             .primaryButtonPressed,
@@ -178,4 +342,19 @@ private extension VideoTarget {
             canDirectPlay: canDirectPlay
         )
     }
+}
+
+private extension VoiceVACPhase {
+    static let everyCase: [VoiceVACPhase] = [
+        .idle,
+        .dragging,
+        .targetDetected,
+        .tabAudioOnly,
+        .ready,
+        .transcribing,
+        .paused,
+        .completed,
+        .retracting,
+        .warningYellow
+    ]
 }
