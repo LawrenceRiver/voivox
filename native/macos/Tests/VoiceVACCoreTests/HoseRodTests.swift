@@ -373,21 +373,43 @@ struct HoseRodTests {
         #expect(rod.snapshot.joints.last?.position == SIMD3(820, 120, 0))
     }
 
-    @Test("pending legacy pins fail observably when their span exceeds material")
-    func legacyPendingInfeasibility() {
+    @Test("legacy active-length changes reject infeasible pending pins atomically")
+    func legacyActiveLengthIsAtomic() {
         var rod = HoseRod(configuration: .voiceVAC, seed: 33)
         expectSuccess(rod.pinRoot(.zero, orientation: .identity))
         expectSuccess(rod.pinTip(SIMD3(1_200, 0, 0), orientation: .identity))
-        expectSuccess(rod.setActiveLength(500))
+        let before = rod.snapshot
 
-        expectFailure(rod.step(deltaTime: step, iterations: 20))
+        expectFailure(rod.setActiveLength(500))
+
         guard case let .infeasibleSpan(span, availableLength) = rod.lastFailure else {
             Issue.record("Expected typed infeasible-span failure")
             return
         }
         #expect(span == 1_200)
         #expect(availableLength == 500)
+        #expect(rod.snapshot == before)
         #expect(rod.maximumSegmentStrain > 0.08)
+    }
+
+    @Test("zero-rest displaced segments report unbounded strain")
+    func zeroRestDisplacementIsNotReportedAsZeroStrain() {
+        var rod = HoseRod(configuration: .voiceVAC, seed: 34)
+        let initial = rod.snapshot
+
+        expectFailure(rod.setActiveLength(0))
+        guard case let .infeasibleSpan(span, availableLength) = rod.lastFailure else {
+            Issue.record("Expected typed infeasible-span failure")
+            return
+        }
+        #expect(span == rod.configuration.naturalSegmentLength)
+        #expect(availableLength == 0)
+        #expect(rod.snapshot == initial)
+
+        expectDeploymentSuccess(rod.retract(by: rod.configuration.naturalSegmentLength))
+        #expect(rod.activeLength == 0)
+        expectSuccess(rod.pinTip(SIMD3(1, 0, 0), orientation: .identity))
+        #expect(rod.maximumSegmentStrain == .infinity)
     }
 
     @Test("retraction moves the tip atomically once slack is exhausted")
@@ -625,8 +647,8 @@ struct HoseRodTests {
         }
     }
 
-    @Test("abrupt tip swing is rate-limited and cannot report unsafe success")
-    func abruptTipSwingIsRateLimited() {
+    @Test("abrupt tip swing is redistributed without unsafe solver success")
+    func abruptTipSwingIsRedistributedSafely() {
         var rod = HoseRod(configuration: .voiceVAC, seed: 112)
         let tip = SIMD3<Double>(720, 0, 0)
         expectDeploymentSuccess(
@@ -649,11 +671,12 @@ struct HoseRodTests {
                 activeLength: 800
             )
         )
+        #expect(maximumAdjacentAngle(in: rod.snapshot) <= 1.10)
 
         var eventuallySucceeded = false
-        var sawTypedFailure = false
         for _ in 0..<8 {
-            let before = Dictionary(
+            let before = rod.snapshot
+            let beforeOrientations = Dictionary(
                 uniqueKeysWithValues: rod.snapshot.joints.map {
                     ($0.materialID, $0.orientation)
                 }
@@ -661,7 +684,7 @@ struct HoseRodTests {
             let succeeded = rod.step(deltaTime: step, iterations: 24)
             let after = rod.snapshot.joints
             for joint in after.dropFirst().dropLast() {
-                if let previous = before[joint.materialID] {
+                if let previous = beforeOrientations[joint.materialID] {
                     #expect(quaternionGeodesic(previous, joint.orientation) <= 1.10)
                 }
             }
@@ -678,9 +701,8 @@ struct HoseRodTests {
                 Issue.record("Expected typed angular failure, got \(String(describing: rod.lastFailure))")
                 break
             }
-            sawTypedFailure = true
+            #expect(rod.snapshot == before)
         }
-        #expect(sawTypedFailure)
         #expect(eventuallySucceeded)
         #expect(
             quaternionGeodesic(
@@ -688,6 +710,75 @@ struct HoseRodTests {
                 simd_quatd(angle: .pi, axis: SIMD3<Double>(0, 1, 0))
             ) < 1e-12
         )
+    }
+
+    @Test("deployment never publishes an adjacent orientation discontinuity")
+    func deploymentEnforcesOrientationAdjacency() {
+        var rod = HoseRod(configuration: .voiceVAC, seed: 113)
+        let tip = SIMD3<Double>(720, 0, 0)
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: tip,
+                tipOrientation: .identity,
+                activeLength: 800
+            )
+        )
+        for _ in 0..<120 {
+            expectSuccess(rod.step(deltaTime: step, iterations: 24))
+        }
+
+        let before = rod.snapshot
+        let result = rod.updateDeployment(
+            tipPosition: tip,
+            tipOrientation: simd_quatd(
+                angle: .pi,
+                axis: SIMD3<Double>(0, 1, 0)
+            ),
+            activeLength: 800
+        )
+        switch result {
+        case .success:
+            #expect(maximumAdjacentAngle(in: rod.snapshot) <= 1.10)
+        case .failure(.angularLimitExceeded):
+            #expect(rod.snapshot == before)
+        case let .failure(failure):
+            Issue.record("Unexpected deployment failure: \(failure)")
+        }
+    }
+
+    @Test("failed angular steps restore positions and orientations atomically")
+    func failedAngularStepIsAtomic() {
+        var rod = HoseRod(configuration: .voiceVAC, seed: 114)
+        let tip = SIMD3<Double>(720, 0, 0)
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: tip,
+                tipOrientation: .identity,
+                activeLength: 800
+            )
+        )
+        for _ in 0..<120 {
+            expectSuccess(rod.step(deltaTime: step, iterations: 24))
+        }
+        expectSuccess(
+            rod.pinRoot(
+                .zero,
+                orientation: simd_quatd(
+                    angle: .pi,
+                    axis: SIMD3<Double>(0, 1, 0)
+                )
+            )
+        )
+
+        for _ in 0..<2 {
+            let before = rod.snapshot
+            expectFailure(rod.step(deltaTime: step, iterations: 24))
+            guard case .angularLimitExceeded = rod.lastFailure else {
+                Issue.record("Expected typed angular failure")
+                return
+            }
+            #expect(rod.snapshot == before)
+        }
     }
 
     @Test("snapshot maps deterministically to exactly 64 rig joints")
@@ -767,9 +858,12 @@ struct HoseRodTests {
 
         expectFailure(rod.setActiveLength(.nan))
         #expect(rod.snapshot == initial)
-        expectSuccess(rod.setActiveLength(-42))
-        #expect(rod.activeLength == 0)
-        #expect(rod.activeNodeCount == 2)
+        expectFailure(rod.setActiveLength(-42))
+        guard case .infeasibleSpan = rod.lastFailure else {
+            Issue.record("Expected clamped zero length to reject the nonzero span")
+            return
+        }
+        #expect(rod.snapshot == initial)
     }
 }
 
@@ -809,6 +903,12 @@ private func expectDeploymentSuccess(
 private func quaternionGeodesic(_ lhs: simd_quatd, _ rhs: simd_quatd) -> Double {
     let dot = abs(simd_dot(lhs.vector, rhs.vector))
     return 2 * acos(max(-1, min(1, dot)))
+}
+
+private func maximumAdjacentAngle(in snapshot: HoseSnapshot) -> Double {
+    zip(snapshot.joints, snapshot.joints.dropFirst()).reduce(0) { maximum, pair in
+        max(maximum, quaternionGeodesic(pair.0.orientation, pair.1.orientation))
+    }
 }
 
 private func testFrame(

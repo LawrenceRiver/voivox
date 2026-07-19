@@ -106,8 +106,10 @@ public struct HoseRod: Sendable {
         return zip(nodes.indices.dropLast(), lengths).reduce(0) { maximum, item in
             let index = item.0
             let restLength = item.1
-            guard restLength > 1e-12 else { return maximum }
             let current = simd_distance(nodes[index].position, nodes[index + 1].position)
+            guard restLength > 1e-12 else {
+                return current <= 1e-12 ? maximum : .infinity
+            }
             let strain = abs(current - restLength) / restLength
             return strain.isFinite ? max(maximum, strain) : .infinity
         }
@@ -154,6 +156,21 @@ public struct HoseRod: Sendable {
             return false
         }
 
+        let span = simd_distance(rootPin.position, position)
+        if span <= activeLength + 1e-9 {
+            let result = updateDeployment(
+                tipPosition: position,
+                tipOrientation: orientation,
+                activeLength: activeLength
+            )
+            guard case .success = result else { return false }
+            return true
+        }
+
+        // Preserve the legacy two-call setup (`pinTip`, then
+        // `setActiveLength`) only while the pending span is longer than the
+        // currently deployed material. A feasible move uses the atomic path
+        // above so callers never need failed solver frames to converge it.
         tipPin = (position, orientation)
         nodes[nodes.count - 1].position = position
         nodes[nodes.count - 1].previousPosition = position
@@ -175,18 +192,16 @@ public struct HoseRod: Sendable {
             return false
         }
         let clamped = min(max(requestedLength, 0), configuration.maximumActiveLength)
-        guard clamped != activeLength else {
-            lastFailure = nil
-            return true
+        let preserveImplicitTip = !hasExplicitTipPin
+        let result = updateDeployment(
+            tipPosition: tipPin.position,
+            tipOrientation: tipPin.orientation,
+            activeLength: clamped
+        )
+        guard case .success = result else { return false }
+        if preserveImplicitTip {
+            hasExplicitTipPin = false
         }
-
-        let span = simd_distance(rootPin.position, tipPin.position)
-        let nodeCount = resolvedNodeCount(
-            for: clamped,
-            span: span
-        ) ?? desiredNodeCount(for: clamped, currentCount: nodes.count)
-        setActiveLengthUnchecked(clamped, nodeCount: nodeCount)
-        lastFailure = nil
         return true
     }
 
@@ -263,6 +278,28 @@ public struct HoseRod: Sendable {
             let failure = HoseSimulationFailure.strainLimitExceeded(
                 maximum: strain,
                 allowed: allowedStrain
+            )
+            self = rollback
+            lastFailure = failure
+            return .failure(failure)
+        }
+        let allowedAngularChange = 1.10
+        if maximumAdjacentOrientationAngle() > allowedAngularChange,
+           nodes.count > 2 {
+            let frames = transportedMaterialFrames()
+            for index in 1..<(nodes.count - 1) {
+                nodes[index].orientation = frames[index]
+            }
+            projectPins()
+        }
+        let maximumAdjacentAngle = maximumAdjacentOrientationAngle()
+        guard maximumAdjacentAngle <= allowedAngularChange + 1e-9 else {
+            let failure = HoseSimulationFailure.angularLimitExceeded(
+                maximumTemporal: maximumMaterialOrientationChange(
+                    relativeTo: rollback.nodes
+                ),
+                maximumAdjacent: maximumAdjacentAngle,
+                allowed: allowedAngularChange
             )
             self = rollback
             lastFailure = failure
@@ -345,11 +382,8 @@ public struct HoseRod: Sendable {
             return false
         }
 
+        let rollback = self
         let rollbackNodes = nodes
-        let rollbackStretch = stretchConstraints
-        let rollbackBend = bendConstraints
-        let rollbackOrientationLambdas = orientationLambdas
-        let rollbackAngularContinuity = angularContinuityConstraints
 
         integrateFreeNodes()
         projectPins()
@@ -402,18 +436,20 @@ public struct HoseRod: Sendable {
         stabilizeVerletHistory(relativeTo: rollbackNodes)
 
         guard allStateIsFinite() else {
-            nodes = rollbackNodes
-            stretchConstraints = rollbackStretch
-            bendConstraints = rollbackBend
-            orientationLambdas = rollbackOrientationLambdas
-            angularContinuityConstraints = rollbackAngularContinuity
-            lastFailure = .nonFiniteState
+            let failure = HoseSimulationFailure.nonFiniteState
+            self = rollback
+            lastFailure = failure
             return false
         }
         let allowedStrain = 0.08
         let strain = maximumSegmentStrain
         guard strain <= allowedStrain else {
-            lastFailure = .strainLimitExceeded(maximum: strain, allowed: allowedStrain)
+            let failure = HoseSimulationFailure.strainLimitExceeded(
+                maximum: strain,
+                allowed: allowedStrain
+            )
+            self = rollback
+            lastFailure = failure
             return false
         }
         let allowedAngularChange = 1.10
@@ -421,11 +457,13 @@ public struct HoseRod: Sendable {
         guard maximumTemporalAngle <= allowedAngularChange + 1e-9,
               maximumAdjacentAngle <= allowedAngularChange + 1e-9
         else {
-            lastFailure = .angularLimitExceeded(
+            let failure = HoseSimulationFailure.angularLimitExceeded(
                 maximumTemporal: maximumTemporalAngle,
                 maximumAdjacent: maximumAdjacentAngle,
                 allowed: allowedAngularChange
             )
+            self = rollback
+            lastFailure = failure
             return false
         }
         lastFailure = nil
@@ -1041,6 +1079,18 @@ public struct HoseRod: Sendable {
     private func maximumAdjacentOrientationAngle() -> Double {
         zip(nodes, nodes.dropFirst()).reduce(0) { maximum, pair in
             max(maximum, orientationAngle(pair.0.orientation, pair.1.orientation))
+        }
+    }
+
+    private func maximumMaterialOrientationChange(
+        relativeTo previousNodes: [HoseNode]
+    ) -> Double {
+        let previousByID = Dictionary(
+            uniqueKeysWithValues: previousNodes.map { ($0.materialID, $0.orientation) }
+        )
+        return nodes.reduce(0) { maximum, node in
+            guard let previous = previousByID[node.materialID] else { return maximum }
+            return max(maximum, orientationAngle(previous, node.orientation))
         }
     }
 
