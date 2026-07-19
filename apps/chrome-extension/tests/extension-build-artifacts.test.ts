@@ -76,6 +76,13 @@ describe('Chrome extension distribution build', () => {
         'utf8'
       );
       expect(`${popup}\n${offscreen}`).not.toMatch(/<script[^>]+src=["']https?:/iu);
+
+      const contentTunnel = await readFile(
+        new URL(`../dist/${channel}/content-tunnel.js`, import.meta.url),
+        'utf8'
+      );
+      expect(contentTunnel).not.toMatch(/^\s*(?:import|export)\s/mu);
+      expect(contentTunnel).toContain('registerContentTunnelRuntime();');
     }
   );
 

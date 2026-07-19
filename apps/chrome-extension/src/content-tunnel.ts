@@ -1,289 +1,638 @@
-import { normalizeCaptureState, type CaptureState } from './bridge.js';
+import { matchesDropToken } from './drop-protocol.js';
+import {
+  isTargetSession,
+  type TargetRect,
+  type TargetSession,
+  type VideoTarget
+} from './target-session.js';
+import { resolveVideoTarget } from './video-target.js';
 
 const ROOT_ID = 'vacvox-tunnel-root';
-const RUNTIME_MARKER = 'voiceVacContentTunnelRuntimeV1';
+const RUNTIME_MARKER = Symbol.for('com.voice-vac.content-tunnel-runtime.v1');
+const TARGET_ATTRIBUTE = 'data-voice-vac-target-id';
+const TARGET_OUTLINE_CLASS = 'voice-vac-target-outline';
+const MEDIA_TARGET_SEMANTICS = /(?:^|[\s_-])(audio|media|player|video)(?:$|[\s_-])/u;
+const SHADOW_STYLES = `
+.voice-vac-drop-catcher {
+  background: transparent;
+  cursor: default;
+  inset: 0;
+  pointer-events: none;
+  position: fixed;
+  z-index: 2147483647;
+}
+.voice-vac-drop-catcher.is-active {
+  cursor: copy;
+  pointer-events: auto;
+}
+.voice-vac-drop-catcher.is-rejected {
+  box-shadow: inset 0 0 0 2px rgb(209 153 59 / 72%);
+}
+.voice-vac-drop-catcher.is-rejected::after {
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+  background: rgb(255 249 236 / 94%);
+  border: 1px solid rgb(209 153 59 / 42%);
+  border-radius: 999px;
+  box-shadow: 0 8px 24px rgb(88 61 18 / 16%);
+  color: #6f501d;
+  content: "No playable video found";
+  font: 600 13px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  left: 50%;
+  padding: 10px 15px;
+  position: fixed;
+  top: 24px;
+  transform: translateX(-50%);
+}
+.voice-vac-play-prompt {
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+  background: rgb(246 250 252 / 88%);
+  border: 1px solid rgb(255 255 255 / 94%);
+  border-radius: 999px;
+  box-shadow: 0 8px 24px rgb(28 52 67 / 20%), inset 0 1px 0 rgb(255 255 255 / 98%);
+  color: #334a57;
+  cursor: pointer;
+  font: 600 13px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  padding: 10px 15px;
+  pointer-events: auto;
+  white-space: nowrap;
+  z-index: 2147483647;
+}`;
+
+type DragIdentity = Readonly<{
+  sessionId: string;
+  dropToken: string;
+}>;
+
+type ContentTunnelDependencies = Readonly<{
+  document?: Document;
+  window?: Window;
+  sendMessage?: (message: unknown) => Promise<unknown>;
+  elementsFromPoint?: (clientX: number, clientY: number) => readonly Element[];
+  isTrustedEvent?: (event: Event) => boolean;
+  randomUUID?: () => string;
+}>;
+
+type ResolvedElementTarget = Readonly<{
+  element: Element;
+  target: VideoTarget;
+}>;
+
+type OriginalOutline = Readonly<{
+  outline: string;
+  outlineOffset: string;
+  outlinePriority: string;
+  outlineOffsetPriority: string;
+}>;
+
+type PublicationContext = Readonly<{
+  generation: number;
+  sessionId: string;
+}>;
+
+type QueuedPreview = PublicationContext & Readonly<{
+  message: Record<string, unknown>;
+}>;
+
+type TunnelState = 'armed' | 'connecting' | 'detecting' | 'dragging' | 'ready' | 'rejected';
 
 export type MountedContentTunnel = {
   host: HTMLElement;
-  update: (state: CaptureState) => void;
+  configure: (session: TargetSession) => void;
+  beginDrag: (identity: DragIdentity) => boolean;
+  cancelDrag: (sessionId?: string) => boolean;
   destroy: () => void;
 };
 
-export function mountContentTunnel(): MountedContentTunnel {
-  const existing = document.getElementById(ROOT_ID);
-  if (existing) {
-    const host = existing.querySelector<HTMLElement>('[data-vacvox-host]');
-    if (host) return { host, update: () => undefined, destroy: () => existing.remove() };
-    existing.remove();
-  }
+const mountedByDocument = new WeakMap<Document, MountedContentTunnel>();
 
-  const root = document.createElement('div');
+export function mountContentTunnel(
+  dependencies: ContentTunnelDependencies = {}
+): MountedContentTunnel {
+  const doc = dependencies.document ?? document;
+  const win = dependencies.window ?? window;
+  const previous = mountedByDocument.get(doc);
+  previous?.destroy();
+  doc.getElementById(ROOT_ID)?.remove();
+
+  const sendMessage = dependencies.sendMessage ?? ((message: unknown) => (
+    chrome.runtime.sendMessage(message)
+  ));
+  const elementsFromPoint = dependencies.elementsFromPoint ?? ((clientX, clientY) => (
+    typeof doc.elementsFromPoint === 'function'
+      ? doc.elementsFromPoint(clientX, clientY)
+      : []
+  ));
+  const isTrustedEvent = dependencies.isTrustedEvent ?? ((event: Event) => event.isTrusted);
+  const randomUUID = dependencies.randomUUID ?? (() => crypto.randomUUID());
+
+  const root = doc.createElement('div');
   root.id = ROOT_ID;
+  root.dataset.voiceVacOverlay = 'true';
   const shadow = root.attachShadow?.({ mode: 'open' }) ?? root;
-  const host = document.createElement('div');
-  host.dataset.vacvoxHost = 'true';
-  host.innerHTML = machineMarkup();
+  const host = doc.createElement('div');
+  host.dataset.voiceVacOverlay = 'true';
+  const stylesheet = doc.createElement('style');
+  stylesheet.textContent = SHADOW_STYLES;
+  const catcher = doc.createElement('div');
+  catcher.className = 'voice-vac-drop-catcher';
+  catcher.dataset.voiceVacOverlay = 'true';
+  catcher.setAttribute('aria-hidden', 'true');
+  Object.assign(catcher.style, {
+    background: 'transparent',
+    inset: '0',
+    pointerEvents: 'none',
+    position: 'fixed',
+    zIndex: '2147483647'
+  });
+  host.append(stylesheet, catcher);
   shadow.append(host);
-  document.documentElement.append(root);
+  doc.documentElement.append(root);
 
-  const head = requireElement<HTMLButtonElement>(host, '[data-role="head"]');
-  const primary = requireElement<HTMLButtonElement>(host, '[data-role="primary"]');
-  const copy = requireElement<HTMLButtonElement>(host, '[data-role="copy"]');
-  const close = requireElement<HTMLButtonElement>(host, '[data-role="close"]');
-  const status = requireElement<HTMLElement>(host, '[data-role="status"]');
-  const transcript = requireElement<HTMLElement>(host, '[data-role="transcript"]');
-  const title = requireElement<HTMLElement>(host, '[data-role="title"]');
-  const linkOverlay = createLinkOverlay();
-  let currentState = normalizeCaptureState(undefined);
-  let selectedVideo: HTMLVideoElement | undefined;
-  let selectedVideoOutline = '';
-  let dragging = false;
+  let session: TargetSession | undefined;
+  let dragSession: TargetSession | undefined;
+  let candidate: ResolvedElementTarget | undefined;
+  let attached: ResolvedElementTarget | undefined;
+  let prompt: HTMLButtonElement | undefined;
+  let destroyed = false;
+  let generation = 0;
+  let dropPending = false;
+  let pendingPreview: QueuedPreview | undefined;
+  let previewDrain: Promise<void> | undefined;
+  let publicationTail: Promise<void> = Promise.resolve();
+  const originalOutlines = new WeakMap<Element, OriginalOutline>();
 
-  const update = (nextState: CaptureState): void => {
-    currentState = nextState;
-    const processing = nextState.active || nextState.phase === 'downloading' || nextState.phase === 'transcribing';
-    host.classList.toggle('is-processing', processing);
-    host.classList.toggle('is-error', nextState.phase === 'error');
-    host.classList.toggle('is-ready', nextState.linkState === 'ready');
-    status.textContent = statusLabel(nextState.phase);
-    title.textContent = nextState.tabTitle ?? document.title ?? '当前视频';
-    transcript.textContent = nextState.transcript ?? '文字会从这里出现。';
-    primary.setAttribute('aria-label', processing ? '暂停转录' : nextState.phase === 'complete' ? '重新转录' : '检测视频');
-    primary.textContent = processing ? 'Ⅱ' : '▶';
-    copy.disabled = !nextState.transcript?.trim();
-    drawLink();
+  const publishBestEffort = (message: unknown): void => {
+    void Promise.resolve(sendMessage(message)).catch(() => undefined);
   };
 
-  function findVideo(clientX: number, clientY: number): HTMLVideoElement | undefined {
-    const element = document.elementFromPoint?.(clientX, clientY);
-    const candidate = element?.closest?.('video');
-    if (candidate instanceof HTMLVideoElement) return candidate;
-    return Array.from(document.querySelectorAll('video')).find((video) => {
-      const rect = video.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0 && clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
-    });
-  }
-
-  function highlight(video: HTMLVideoElement | undefined): void {
-    if (selectedVideo && selectedVideo !== video) selectedVideo.style.outline = selectedVideoOutline;
-    selectedVideo = video;
-    if (video) {
-      selectedVideoOutline = video.style.outline;
-      video.style.outline = '3px solid #90c9dd';
-      video.style.outlineOffset = '4px';
+  const setTunnelState = (state: TunnelState): void => {
+    host.dataset.tunnelState = state;
+    const rejected = state === 'rejected';
+    catcher.classList.toggle('is-rejected', rejected);
+    if (rejected) {
+      catcher.setAttribute('aria-label', 'No playable video found');
+    } else {
+      catcher.removeAttribute('aria-label');
     }
-    drawLink();
-  }
+  };
 
-  function targetPayload(video: HTMLVideoElement | undefined): Record<string, unknown> {
-    if (!video) return {};
-    const rect = video.getBoundingClientRect();
-    const screenX = window.screenX || 0;
-    const screenY = window.screenY || 0;
-    return {
-      targetRect: { x: screenX + rect.left, y: screenY + rect.top, width: rect.width, height: rect.height },
-      pageEndpoint: { screenX: screenX + rect.left + rect.width * .5, screenY: screenY + rect.top + rect.height * .12 }
-    };
-  }
+  const isCurrentPublication = (context: PublicationContext): boolean => (
+    !destroyed
+    && context.generation === generation
+    && session?.id === context.sessionId
+    && dragSession?.id === context.sessionId
+  );
 
-  function drawLink(): void {
-    if (!selectedVideo) {
-      linkOverlay.path.setAttribute('d', '');
+  const sendAcknowledged = async (message: Record<string, unknown>): Promise<boolean> => {
+    try {
+      const response = await sendMessage(message);
+      return isRecord(response) && response.ok === true;
+    } catch {
+      return false;
+    }
+  };
+
+  const enqueuePublication = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = publicationTail.then(operation, operation);
+    publicationTail = result.then(() => undefined, () => undefined);
+    return result;
+  };
+
+  const publishRejection = async (
+    context: PublicationContext,
+    code: string
+  ): Promise<void> => {
+    if (!isCurrentPublication(context)) return;
+    try {
+      await sendMessage({
+        target: 'service-worker',
+        type: 'target:rejected',
+        sessionId: context.sessionId,
+        error: { code, retryable: true }
+      });
+    } catch {
+      // The catcher already exposes a stable local rejection state.
+    }
+  };
+
+  const startPreviewDrain = (): void => {
+    if (previewDrain) return;
+    const drain = enqueuePublication(async () => {
+      while (pendingPreview) {
+        const next = pendingPreview;
+        pendingPreview = undefined;
+        if (!isCurrentPublication(next)) continue;
+        const acknowledged = await sendAcknowledged(next.message);
+        if (!acknowledged && isCurrentPublication(next) && !dropPending) {
+          setTunnelState('rejected');
+        }
+      }
+    });
+    previewDrain = drain.finally(() => {
+      previewDrain = undefined;
+      if (pendingPreview) startPreviewDrain();
+    });
+  };
+
+  const schedulePreview = (preview: QueuedPreview): void => {
+    pendingPreview = preview;
+    startPreviewDrain();
+  };
+
+  const setCatcherActive = (active: boolean): void => {
+    catcher.classList.toggle('is-active', active);
+    catcher.setAttribute('aria-hidden', String(!active));
+    catcher.style.pointerEvents = active ? 'auto' : 'none';
+  };
+
+  const decorate = (resolved: ResolvedElementTarget): void => {
+    const { element, target } = resolved;
+    if (target.kind === 'html-media') element.setAttribute(TARGET_ATTRIBUTE, target.id);
+    if (element instanceof HTMLElement && !originalOutlines.has(element)) {
+      originalOutlines.set(element, {
+        outline: element.style.outline,
+        outlineOffset: element.style.outlineOffset,
+        outlinePriority: element.style.getPropertyPriority('outline'),
+        outlineOffsetPriority: element.style.getPropertyPriority('outline-offset')
+      });
+      element.style.setProperty('outline', '3px solid rgba(91, 155, 213, 0.9)', 'important');
+      element.style.setProperty('outline-offset', '4px', 'important');
+    }
+    element.classList.add(TARGET_OUTLINE_CLASS);
+  };
+
+  const undecorate = (resolved: ResolvedElementTarget | undefined): void => {
+    if (!resolved) return;
+    const { element, target } = resolved;
+    element.classList.remove(TARGET_OUTLINE_CLASS);
+    if (element instanceof HTMLElement) {
+      const original = originalOutlines.get(element);
+      if (original) {
+        element.style.setProperty('outline', original.outline, original.outlinePriority);
+        element.style.setProperty(
+          'outline-offset',
+          original.outlineOffset,
+          original.outlineOffsetPriority
+        );
+        originalOutlines.delete(element);
+      }
+    }
+    if (target.kind === 'html-media'
+      && element.getAttribute(TARGET_ATTRIBUTE) === target.id) {
+      element.removeAttribute(TARGET_ATTRIBUTE);
+    }
+  };
+
+  const clearCandidate = (): void => {
+    if (candidate?.element !== attached?.element) undecorate(candidate);
+    candidate = undefined;
+  };
+
+  const removePrompt = (): void => {
+    prompt?.remove();
+    prompt = undefined;
+  };
+
+  const clearAttached = (): void => {
+    removePrompt();
+    undecorate(attached);
+    attached = undefined;
+  };
+
+  const resolveAt = (event: DragEvent): ResolvedElementTarget | undefined => {
+    const elements = [...elementsFromPoint(event.clientX, event.clientY)];
+    const target = resolveVideoTarget({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      screenX: event.screenX,
+      screenY: event.screenY,
+      documentId: dragSession?.documentId ?? session?.documentId ?? 'unknown-document',
+      frameId: dragSession?.frameId ?? session?.frameId ?? 0,
+      elements,
+      randomUUID
+    });
+    if (!target) return undefined;
+    const element = findResolvedElement(elements, target);
+    if (target.kind === 'html-media'
+      && element?.getAttribute(TARGET_ATTRIBUTE) === target.id) {
+      element.removeAttribute(TARGET_ATTRIBUTE);
+    }
+    return element ? { element, target } : undefined;
+  };
+
+  const compatibilityFields = (target: VideoTarget): Record<string, unknown> => ({
+    targetRect: target.screenRect,
+    pageEndpoint: {
+      screenX: target.screenRect.x + target.screenRect.width / 2,
+      screenY: target.screenRect.y + target.screenRect.height * 0.12
+    },
+    tabTitle: doc.title || session?.title || 'Current video',
+    url: win.location.href
+  });
+
+  const showPlayPrompt = (target: VideoTarget): void => {
+    removePrompt();
+    if (target.canDirectPlay) return;
+    const button = doc.createElement('button');
+    button.type = 'button';
+    button.className = 'voice-vac-play-prompt';
+    button.dataset.voiceVacOverlay = 'true';
+    button.textContent = 'Press play once in Chrome.';
+    Object.assign(button.style, promptPosition(target.viewportRect), {
+      pointerEvents: 'auto',
+      position: 'fixed',
+      zIndex: '2147483647'
+    });
+    button.addEventListener('click', (event) => {
+      if (!isTrustedEvent(event) || !session || attached?.target.id !== target.id) return;
+      publishBestEffort({
+        target: 'service-worker',
+        type: 'playback:user-started',
+        sessionId: session.id
+      });
+    });
+    host.append(button);
+    prompt = button;
+  };
+
+  const onDragOver = (event: DragEvent): void => {
+    if (!dragSession || !hasPlainText(event.dataTransfer?.types)) return;
+    event.preventDefault();
+    if (dropPending) return;
+    clearCandidate();
+    const resolved = resolveAt(event);
+    if (!resolved) return;
+    candidate = resolved;
+    decorate(resolved);
+    setTunnelState('detecting');
+    schedulePreview({
+      generation,
+      sessionId: dragSession.id,
+      message: {
+        target: 'service-worker',
+        type: 'target:preview',
+        sessionId: dragSession.id,
+        videoTarget: resolved.target,
+        ...compatibilityFields(resolved.target)
+      }
+    });
+  };
+
+  const onDrop = (event: DragEvent): void => {
+    const active = dragSession;
+    if (!active || !isTrustedEvent(event)) return;
+    const supplied = event.dataTransfer?.getData('text/plain') ?? '';
+    if (!matchesDropToken(active, supplied)) return;
+    event.preventDefault();
+    if (dropPending) return;
+    clearCandidate();
+    const resolved = resolveAt(event);
+    if (!resolved) {
+      const context = { generation, sessionId: active.id };
+      pendingPreview = undefined;
+      setTunnelState('rejected');
+      void enqueuePublication(() => publishRejection(context, 'NO_PLAYABLE_MEDIA'));
       return;
     }
-    const headRect = head.getBoundingClientRect();
-    const targetRect = selectedVideo.getBoundingClientRect();
-    const startX = headRect.left + headRect.width * .5;
-    const startY = headRect.top + headRect.height * .5;
-    const endX = targetRect.left + targetRect.width * .5;
-    const endY = targetRect.top + targetRect.height * .12;
-    const bend = Math.max(70, Math.abs(endX - startX) * .28);
-    linkOverlay.path.setAttribute('d', `M ${startX} ${startY} C ${startX + bend} ${startY - 18}, ${endX - bend} ${endY + 26}, ${endX} ${endY}`);
-    linkOverlay.path.classList.toggle('is-flowing', currentState.active || dragging);
-    linkOverlay.target.setAttribute('cx', String(endX));
-    linkOverlay.target.setAttribute('cy', String(endY));
-  }
 
-  const onMove = (event: PointerEvent): void => {
-    if (!dragging) return;
-    const video = findVideo(event.clientX, event.clientY);
-    highlight(video);
-    void chrome.runtime.sendMessage({ target: 'service-worker', type: 'target:preview', ...targetPayload(video) });
-  };
-  const onUp = (event: PointerEvent): void => {
-    if (!dragging) return;
-    dragging = false;
-    host.classList.remove('is-dragging');
-    const video = findVideo(event.clientX, event.clientY) ?? selectedVideo;
-    highlight(video);
-    if (video) {
-      void chrome.runtime.sendMessage({
-        target: 'service-worker',
-        type: 'target:ready',
-        ...targetPayload(video),
-        tabTitle: document.title || '当前视频',
-        url: window.location.href
-      });
-      status.textContent = '已就绪';
-    }
+    const context = { generation, sessionId: active.id };
+    const readyMessage = {
+      target: 'service-worker',
+      type: 'target:ready',
+      sessionId: active.id,
+      videoTarget: resolved.target,
+      ...compatibilityFields(resolved.target)
+    };
+    dropPending = true;
+    pendingPreview = undefined;
+    setTunnelState('connecting');
+    void enqueuePublication(async () => {
+      if (!isCurrentPublication(context)) return;
+      const acknowledged = await sendAcknowledged(readyMessage);
+      if (!isCurrentPublication(context)) return;
+      dropPending = false;
+      if (!acknowledged) {
+        setTunnelState('rejected');
+        await publishRejection(context, 'TARGET_READY_NOT_ACKNOWLEDGED');
+        return;
+      }
+
+      clearAttached();
+      attached = resolved;
+      decorate(resolved);
+      dragSession = undefined;
+      setCatcherActive(false);
+      setTunnelState('ready');
+      showPlayPrompt(resolved.target);
+    });
   };
 
-  head.addEventListener('pointerdown', (event) => {
-    dragging = true;
-    host.classList.add('is-dragging');
-    head.setPointerCapture?.(event.pointerId);
-    highlight(findVideo(event.clientX, event.clientY));
-    drawLink();
-  });
-  document.addEventListener('pointermove', onMove);
-  document.addEventListener('pointerup', onUp);
-  primary.addEventListener('click', () => {
-    void chrome.runtime.sendMessage({ target: 'service-worker', type: 'capture:toggle' });
-  });
-  copy.addEventListener('click', () => {
-    if (currentState.transcript) void navigator.clipboard?.writeText(currentState.transcript);
-    copy.textContent = '已复制';
-    window.setTimeout(() => { copy.textContent = '复制全文'; }, 1_000);
-  });
-  close.addEventListener('click', () => mounted.destroy());
-  const onStorageChanged = (
-    changes: Record<string, chrome.storage.StorageChange>,
-    areaName: string
-  ): void => {
-    if (areaName === 'local' && changes.voivoxCaptureState) update(normalizeCaptureState(changes.voivoxCaptureState.newValue));
-  };
-  chrome.storage.onChanged?.addListener(onStorageChanged);
+  const onPageHide = (): void => mounted.destroy();
+  doc.addEventListener('dragover', onDragOver);
+  doc.addEventListener('drop', onDrop);
+  win.addEventListener('pagehide', onPageHide, { once: true });
 
   const mounted: MountedContentTunnel = {
     host,
-    update,
-    destroy: () => {
-      document.removeEventListener('pointermove', onMove);
-      document.removeEventListener('pointerup', onUp);
-      window.removeEventListener('resize', drawLink);
-      window.removeEventListener('scroll', drawLink, true);
-      chrome.storage.onChanged?.removeListener?.(onStorageChanged);
-      if (selectedVideo) {
-        selectedVideo.style.outline = selectedVideoOutline;
-        selectedVideo.style.removeProperty('outline-offset');
+    configure: (nextSession) => {
+      if (destroyed) return;
+      clearCandidate();
+      clearAttached();
+      generation += 1;
+      dropPending = false;
+      pendingPreview = undefined;
+      dragSession = undefined;
+      session = nextSession;
+      setCatcherActive(false);
+      setTunnelState('armed');
+    },
+    beginDrag: (identity) => {
+      if (destroyed
+        || !session
+        || identity.sessionId !== session.id
+        || !matchesDropToken(session, identity.dropToken)) {
+        return false;
       }
-      linkOverlay.svg.remove();
+      clearCandidate();
+      clearAttached();
+      generation += 1;
+      dropPending = false;
+      pendingPreview = undefined;
+      dragSession = session;
+      setCatcherActive(true);
+      setTunnelState('dragging');
+      return true;
+    },
+    cancelDrag: (sessionId) => {
+      if (destroyed
+        || !dragSession
+        || (sessionId !== undefined && dragSession.id !== sessionId)) {
+        return false;
+      }
+      clearCandidate();
+      generation += 1;
+      dropPending = false;
+      pendingPreview = undefined;
+      dragSession = undefined;
+      setCatcherActive(false);
+      setTunnelState('armed');
+      return true;
+    },
+    destroy: () => {
+      if (destroyed) return;
+      destroyed = true;
+      generation += 1;
+      dropPending = false;
+      pendingPreview = undefined;
+      doc.removeEventListener('dragover', onDragOver);
+      doc.removeEventListener('drop', onDrop);
+      win.removeEventListener('pagehide', onPageHide);
+      clearCandidate();
+      clearAttached();
+      dragSession = undefined;
+      session = undefined;
+      setCatcherActive(false);
       root.remove();
+      if (mountedByDocument.get(doc) === mounted) mountedByDocument.delete(doc);
     }
   };
-  window.addEventListener('resize', drawLink);
-  window.addEventListener('scroll', drawLink, true);
-  update(currentState);
-  void chrome.runtime.sendMessage({ target: 'service-worker', type: 'capture-state:get' })
-    .then((value: unknown) => update(normalizeCaptureState(value)))
-    .catch(() => undefined);
+  mountedByDocument.set(doc, mounted);
   return mounted;
 }
 
-export function registerContentTunnelRuntime(): void {
-  if (document.documentElement.dataset[RUNTIME_MARKER] === 'true') return;
-  document.documentElement.dataset[RUNTIME_MARKER] = 'true';
-  let mounted: MountedContentTunnel | undefined = mountContentTunnel();
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type === 'target-disconnect') {
-      mounted?.destroy();
-      mounted = undefined;
+export function registerContentTunnelRuntime(
+  dependencies: ContentTunnelDependencies = {}
+): void {
+  const doc = dependencies.document ?? document;
+  const win = dependencies.window ?? window;
+  if (win.top !== win) return;
+  const runtimeGlobal = win as unknown as Record<PropertyKey, unknown>;
+  if (Object.prototype.hasOwnProperty.call(runtimeGlobal, RUNTIME_MARKER)) return;
+  Object.defineProperty(runtimeGlobal, RUNTIME_MARKER, {
+    configurable: true,
+    enumerable: false,
+    value: Object.freeze({ owner: 'voice-vac', version: 1 }),
+    writable: false
+  });
+  let mounted: MountedContentTunnel | undefined;
+  let activeSessionId: string | undefined;
+
+  chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
+    if (!isRecord(message)) return;
+    if (message.type === 'session:armed') {
+      if (!isTargetSession(message.session)) {
+        sendResponse({ ok: false });
+        return;
+      }
+      mounted ??= mountContentTunnel(dependencies);
+      mounted.configure(message.session);
+      activeSessionId = message.session.id;
       sendResponse({ ok: true });
       return;
     }
-    if (message?.type === 'session:armed') {
-      mounted ??= mountContentTunnel();
-      sendResponse({ ok: true });
+    if (message.type === 'drag:begin') {
+      const ok = typeof message.sessionId === 'string'
+        && typeof message.dropToken === 'string'
+        && (mounted?.beginDrag({
+          sessionId: message.sessionId,
+          dropToken: message.dropToken
+        }) ?? false);
+      sendResponse({ ok });
+      return;
+    }
+    if (message.type === 'drag:cancel') {
+      const ok = typeof message.sessionId === 'string'
+        && (mounted?.cancelDrag(message.sessionId) ?? false);
+      sendResponse({ ok });
+      return;
+    }
+    if (message.type === 'target-disconnect') {
+      const ok = typeof message.sessionId === 'string'
+        && message.sessionId === activeSessionId
+        && mounted !== undefined;
+      if (ok) {
+        mounted?.destroy();
+        mounted = undefined;
+        activeSessionId = undefined;
+      }
+      sendResponse({ ok });
     }
   });
 }
 
-function createLinkOverlay(): {
-  svg: SVGSVGElement;
-  path: SVGPathElement;
-  target: SVGCircleElement;
-} {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('aria-hidden', 'true');
-  svg.setAttribute('viewBox', `0 0 ${window.innerWidth} ${window.innerHeight}`);
-  Object.assign(svg.style, {
-    height: '100vh',
-    left: '0',
-    pointerEvents: 'none',
-    position: 'fixed',
-    top: '0',
-    width: '100vw',
-    zIndex: '2147483646'
-  });
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('fill', 'none');
-  path.setAttribute('stroke', '#94c9da');
-  path.setAttribute('stroke-linecap', 'round');
-  path.setAttribute('stroke-width', '12');
-  path.setAttribute('opacity', '.74');
-  path.style.filter = 'drop-shadow(0 3px 6px rgb(73 112 127 / 25%))';
-  const target = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-  target.setAttribute('fill', '#ffffff');
-  target.setAttribute('stroke', '#94c9da');
-  target.setAttribute('stroke-width', '3');
-  target.setAttribute('r', '7');
-  svg.append(path, target);
-  document.documentElement.append(svg);
-  return { svg, path, target };
+function findResolvedElement(
+  elements: readonly Element[],
+  target: VideoTarget
+): Element | undefined {
+  const pageElements = elements.filter((element) => !isVoiceVacOverlay(element));
+  if (target.kind === 'html-media') {
+    return pageElements.find((element) => element.getAttribute(TARGET_ATTRIBUTE) === target.id);
+  }
+  return pageElements.find((element) => (
+    elementMatchesTargetKind(element, target.kind)
+      && sameRect(element.getBoundingClientRect(), target.viewportRect)
+  ));
 }
 
-function machineMarkup(): string {
-  const stylesheetUrl = typeof chrome.runtime.getURL === 'function'
-    ? chrome.runtime.getURL('content-tunnel.css')
-    : 'content-tunnel.css';
-  return `
-    <link rel="stylesheet" href="${stylesheetUrl}">
-    <div class="vacvox-machine" role="region" aria-label="Voice Vac PVTT">
-      <button class="vacvox-close" data-role="close" aria-label="关闭">×</button>
-      <div class="vacvox-plaque"><span></span>PVTT<small>PRIVATE AUDIO</small></div>
-      <div class="vacvox-stage">
-      <div class="vacvox-intake">
-        <button class="vacvox-head" data-role="head" aria-label="连接到视频"><i></i><i></i><b></b></button>
-        <small>吸音头</small>
-      </div>
-      <div class="vacvox-hose"><i></i><i></i><i></i><i></i><i></i></div>
-      <div class="vacvox-control">
-        <button class="vacvox-primary" data-role="primary" aria-label="检测视频">▶</button>
-        <span class="vacvox-status" data-role="status" aria-live="polite">检测视频</span>
-      </div>
-      <div class="vacvox-hose vacvox-hose--out"><i></i><i></i><i></i><i></i><i></i></div>
-      <div class="vacvox-output">
-        <div class="vacvox-output-head"><div><small>字幕输出舱</small><strong data-role="title">当前视频</strong></div><span>自动</span></div>
-        <div class="vacvox-transcript" data-role="transcript" aria-live="polite">文字会从这里出现。</div>
-        <button class="vacvox-copy" data-role="copy" disabled>复制全文</button>
-      </div>
-      </div>
-      <div class="vacvox-footnote"><span></span>目标标签页静音 · 其他声音保持不变</div>
-    </div>`;
+function elementMatchesTargetKind(
+  element: Element,
+  kind: VideoTarget['kind']
+): boolean {
+  const tag = element.tagName.toLowerCase();
+  if (kind === 'html-media') return false;
+  if (kind === 'embedded-player') {
+    return tag === 'iframe' || tag === 'embed' || tag === 'object';
+  }
+  if (element.hasAttribute('data-player')
+    || element.hasAttribute('data-video-player')
+    || element.hasAttribute('data-media-player')) {
+    return true;
+  }
+  const semantics = [
+    element.id,
+    element.className,
+    element.getAttribute('role'),
+    element.getAttribute('aria-label'),
+    element.getAttribute('title'),
+    element.getAttribute('data-testid')
+  ].filter((value): value is string => typeof value === 'string').join(' ').toLowerCase();
+  return MEDIA_TARGET_SEMANTICS.test(semantics);
 }
 
-function statusLabel(phase: CaptureState['phase']): string {
-  const labels: Record<CaptureState['phase'], string> = {
-    idle: '检测视频',
-    armed: '已武装',
-    connecting: '正在连接',
-    'awaiting-user-play': '等待播放',
-    capturing: '正在连接',
-    paused: '已暂停',
-    downloading: '正在准备',
-    transcribing: '正在转录',
-    complete: '已完成',
-    error: '失败'
+function isVoiceVacOverlay(element: Element): boolean {
+  const selector = `#${ROOT_ID}, .voice-vac-drop-catcher, [data-voice-vac-overlay]`;
+  return element.matches(selector) || element.closest(selector) !== null;
+}
+
+function sameRect(rect: DOMRect | DOMRectReadOnly, expected: TargetRect): boolean {
+  const x = Number.isFinite(rect.x) ? rect.x : rect.left;
+  const y = Number.isFinite(rect.y) ? rect.y : rect.top;
+  return x === expected.x
+    && y === expected.y
+    && rect.width === expected.width
+    && rect.height === expected.height;
+}
+
+function promptPosition(rect: TargetRect): Record<string, string> {
+  return {
+    left: `${Math.max(12, rect.x + rect.width / 2)}px`,
+    top: `${Math.max(12, rect.y + Math.min(rect.height * 0.18, 72))}px`,
+    transform: 'translate(-50%, -50%)'
   };
-  return labels[phase];
 }
 
-function requireElement<T extends Element>(root: Element, selector: string): T {
-  const element = root.querySelector(selector);
-  if (!element) throw new Error(`Voice Vac tunnel element is missing: ${selector}`);
-  return element as T;
+function hasPlainText(types: readonly string[] | DOMStringList | undefined): boolean {
+  return types ? Array.from(types).includes('text/plain') : false;
 }
 
-if (typeof chrome !== 'undefined' && typeof document !== 'undefined') {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+if (typeof chrome !== 'undefined'
+  && typeof document !== 'undefined'
+  && typeof chrome.runtime?.onMessage?.addListener === 'function') {
   registerContentTunnelRuntime();
 }

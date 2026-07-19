@@ -24,27 +24,44 @@ const buildChannelContract = await readBuildChannelContract();
 await rm(outputDirectory, { recursive: true, force: true });
 await mkdir(outputDirectory, { recursive: true });
 
-const buildResult = await build({
+const sharedBuildOptions = {
   absWorkingDir: extensionRoot,
   bundle: true,
   define: {
     __VOICE_VAC_CHANNEL__: JSON.stringify(channel)
   },
   entryNames: '[name]',
+  outdir: outputDirectory,
+  platform: 'browser',
+  metafile: true,
+  target: 'chrome116'
+};
+const moduleBuildResult = await build({
+  ...sharedBuildOptions,
   entryPoints: {
     popup: 'src/popup.ts',
     'service-worker': `src/service-worker.${channel}.ts`,
     offscreen: 'src/offscreen.ts',
     'audio-worklet': 'src/audio-worklet.ts',
-    'asr-worker': 'src/asr-worker.ts',
-    'content-tunnel': 'src/content-tunnel.ts'
+    'asr-worker': 'src/asr-worker.ts'
   },
-  format: 'esm',
-  outdir: outputDirectory,
-  platform: 'browser',
-  metafile: true,
-  target: 'chrome116'
+  format: 'esm'
 });
+const contentTunnelBuildResult = await build({
+  ...sharedBuildOptions,
+  entryPoints: { 'content-tunnel': 'src/content-tunnel.ts' },
+  format: 'iife'
+});
+const buildMetafile = {
+  inputs: {
+    ...moduleBuildResult.metafile.inputs,
+    ...contentTunnelBuildResult.metafile.inputs
+  },
+  outputs: {
+    ...moduleBuildResult.metafile.outputs,
+    ...contentTunnelBuildResult.metafile.outputs
+  }
+};
 
 const manifest = {
   ...baseManifest,
@@ -88,7 +105,7 @@ const forbiddenCapabilities = [
   /Input\.dispatchMouseEvent/u,
   /(["'])debugger\1/u
 ];
-const sourceFiles = Object.keys(buildResult.metafile.inputs)
+const sourceFiles = Object.keys(buildMetafile.inputs)
   .filter((path) => ['.js', '.mjs', '.ts'].includes(extname(path)))
   .map((path) => resolve(extensionRoot, path));
 const builtJavaScriptFiles = await javaScriptFiles(outputDirectory);
@@ -111,7 +128,7 @@ if (channel === 'store') {
     }
   }
   await assertNoForbiddenCapabilities(
-    automationNonWorkerSourceFiles(buildResult.metafile),
+    automationNonWorkerSourceFiles(buildMetafile),
     'Automation non-worker source'
   );
   await assertNoForbiddenCapabilities(
