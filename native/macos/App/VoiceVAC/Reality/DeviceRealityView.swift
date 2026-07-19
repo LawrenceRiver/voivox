@@ -3,6 +3,10 @@ import RealityKit
 
 @MainActor
 final class DeviceRealityView: NSView {
+    static let cameraDistance: Float = 1.12
+    static let horizontalFieldOfViewDegrees: Float = 40
+    static let deviceOffset = SIMD3<Float>.zero
+
     let realityView: TransparentARView
     let contractErrorLabel = NSTextField(labelWithString: "")
     private let loader: any RealityAssetLoading
@@ -34,7 +38,7 @@ final class DeviceRealityView: NSView {
             guard let self else { return }
             do {
                 let device = try await loader.loadDevice()
-                device.position = SIMD3(0, 0.052, 0)
+                device.position = Self.deviceOffset
                 let anchor = AnchorEntity(world: .zero)
                 anchor.addChild(device)
 
@@ -42,10 +46,10 @@ final class DeviceRealityView: NSView {
                 camera.camera = PerspectiveCameraComponent(
                     near: 0.01,
                     far: 10,
-                    fieldOfViewInDegrees: 40,
+                    fieldOfViewInDegrees: Self.horizontalFieldOfViewDegrees,
                     fieldOfViewOrientation: .horizontal
                 )
-                camera.position = SIMD3(0, 0, 0.82)
+                camera.position = SIMD3(0, 0, Self.cameraDistance)
                 anchor.addChild(camera)
 
                 let keyLight = DirectionalLight()

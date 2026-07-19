@@ -1,11 +1,49 @@
 import AppKit
 import MetalKit
 import RealityKit
+import VoiceVACCore
 import XCTest
 @testable import Voice_VAC
 
 @MainActor
 final class TransparentCompositionTests: XCTestCase {
+    func testAuthoredDeviceFitsInsideTheCapsuleCameraWithBreathingRoom() async throws {
+        let capsuleSize = OverlayMetrics.phaseOne.capsuleSize
+        let device = try await RealityAssetLoader().loadDevice()
+        let anchor = AnchorEntity(world: .zero)
+        device.position = DeviceRealityView.deviceOffset
+        anchor.addChild(device)
+        let bounds = device.visualBounds(
+            recursive: true,
+            relativeTo: anchor,
+            excludeInactive: false
+        )
+
+        let aspect = Float(capsuleSize.width / capsuleSize.height)
+        let horizontalHalfAngle = DeviceRealityView.horizontalFieldOfViewDegrees * .pi / 360
+        let verticalHalfAngle = atan(tan(horizontalHalfAngle) / aspect)
+        let nearestDepth = DeviceRealityView.cameraDistance - bounds.max.z
+        XCTAssertGreaterThan(nearestDepth, 0, "The camera must remain in front of the entire authored device")
+        let visibleHeight = 2 * nearestDepth * tan(verticalHalfAngle)
+
+        XCTAssertLessThanOrEqual(
+            bounds.extents.y,
+            visibleHeight * 0.90,
+            "The authored vacuum controls must retain at least 10% vertical glass breathing room"
+        )
+        let verticalLimit = visibleHeight * 0.45
+        XCTAssertGreaterThanOrEqual(
+            bounds.min.y,
+            -verticalLimit,
+            "The authored vacuum controls must not clip the lower glass edge"
+        )
+        XCTAssertLessThanOrEqual(
+            bounds.max.y,
+            verticalLimit,
+            "The authored vacuum controls must not clip the upper glass edge"
+        )
+    }
+
     func testHoseViewportIsARealTransparentPremultipliedMetalSurface() throws {
         let viewport = HoseRealityViewport(
             frame: CGRect(x: 0, y: 0, width: 640, height: 480),
