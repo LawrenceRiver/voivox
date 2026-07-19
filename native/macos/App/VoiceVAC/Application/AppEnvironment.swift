@@ -14,11 +14,14 @@ protocol AppEnvironmentFactory {
 struct LiveAppEnvironmentFactory: AppEnvironmentFactory {
     func makeEnvironment() -> AppEnvironment {
         let screenProvider = NSScreenProvider()
+        let hoseRenderSource = HoseRenderSnapshotSource()
+        let hoseRenderSession = HoseRenderSession(source: hoseRenderSource)
         let overlayCoordinator = OverlayCoordinator(
             screenProvider: screenProvider,
-            panelFactory: LivePanelFactory(),
+            panelFactory: LivePanelFactory(hoseRenderSource: hoseRenderSource),
             layoutEngine: OverlayLayoutEngine(),
-            placementStore: CapsulePlacementStore(defaults: .standard)
+            placementStore: CapsulePlacementStore(defaults: .standard),
+            hoseRenderSession: hoseRenderSession
         )
         return AppEnvironment(
             store: VoiceVACStore(),

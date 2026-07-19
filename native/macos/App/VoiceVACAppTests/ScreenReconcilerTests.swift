@@ -5,6 +5,25 @@ import XCTest
 
 @MainActor
 final class ScreenReconcilerTests: XCTestCase {
+    func testProductionCompositionPublishesDockedCoreHoseWhenOverlayStarts() throws {
+        let main = screen(2)
+        let source = HoseRenderSnapshotSource()
+        let session = HoseRenderSession(source: source, seed: 82)
+        let fixture = makeFixture(
+            screens: [main],
+            preferred: main.id,
+            hoseRenderSession: session
+        )
+
+        fixture.coordinator.start(with: VoiceVACStore())
+
+        let renderSnapshot = try XCTUnwrap(source.latest)
+        let nozzleFrame = try XCTUnwrap(fixture.factory.panel(for: .nozzle)?.frame)
+        let tip = renderSnapshot.jointMatrices.last!.columns.3
+        XCTAssertEqual(tip.x, Float(nozzleFrame.midX / 1_000), accuracy: 0.000_1)
+        XCTAssertEqual(tip.y, Float(nozzleFrame.midY / 1_000), accuracy: 0.000_1)
+    }
+
     func testScreenDescriptorResolverGuardsNullAndDuplicateDisplayIDsWithStableFallbacks() {
         let duplicateA = NSObject()
         let duplicateB = NSObject()
@@ -284,7 +303,8 @@ final class ScreenReconcilerTests: XCTestCase {
     private func makeFixture(
         screens: [ScreenDescriptor],
         preferred: ScreenID?,
-        placementStore: CapsulePlacementStore? = nil
+        placementStore: CapsulePlacementStore? = nil,
+        hoseRenderSession: HoseRenderSession? = nil
     ) -> Fixture {
         let provider = FakeScreenProvider(screens: screens, preferredScreenID: preferred)
         let factory = RecordingPanelFactory()
@@ -293,7 +313,8 @@ final class ScreenReconcilerTests: XCTestCase {
             screenProvider: provider,
             panelFactory: factory,
             layoutEngine: OverlayLayoutEngine(),
-            placementStore: placementStore ?? CapsulePlacementStore(defaults: defaults)
+            placementStore: placementStore ?? CapsulePlacementStore(defaults: defaults),
+            hoseRenderSession: hoseRenderSession
         )
         return Fixture(coordinator: coordinator, provider: provider, factory: factory)
     }

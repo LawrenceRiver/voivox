@@ -19,6 +19,7 @@ final class OverlayCoordinator: WindowCoordinating {
     private let panelFactory: any PanelFactory
     private let layoutEngine: OverlayLayoutEngine
     private let placementStore: CapsulePlacementStore
+    private let hoseRenderSession: HoseRenderSession?
     private var panels: [PanelRole: any PanelControlling] = [:]
     private var currentLayout: OverlayLayout?
     private var dragContext: DragContext?
@@ -30,12 +31,14 @@ final class OverlayCoordinator: WindowCoordinating {
         screenProvider: any ScreenProviding,
         panelFactory: any PanelFactory,
         layoutEngine: OverlayLayoutEngine,
-        placementStore: CapsulePlacementStore
+        placementStore: CapsulePlacementStore,
+        hoseRenderSession: HoseRenderSession? = nil
     ) {
         self.screenProvider = screenProvider
         self.panelFactory = panelFactory
         self.layoutEngine = layoutEngine
         self.placementStore = placementStore
+        self.hoseRenderSession = hoseRenderSession
     }
 
     func start(with store: VoiceVACStore) {
@@ -173,6 +176,11 @@ final class OverlayCoordinator: WindowCoordinating {
         panels[.nozzle]?.setFrame(layout.nozzleHitFrame)
         panels[.transcript]?.setFrame(layout.transcriptFrame)
         panels[.urlInput]?.setFrame(layout.transcriptFrame)
+        do {
+            try hoseRenderSession?.dock(in: layout.nozzleHitFrame)
+        } catch {
+            // HoseRenderSession has already surfaced this contract failure in every viewport.
+        }
     }
 
     private func rewriteCorrectedPlacementIfNeeded(

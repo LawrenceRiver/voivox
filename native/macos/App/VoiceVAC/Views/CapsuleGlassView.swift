@@ -3,10 +3,12 @@ import AppKit
 @MainActor
 final class CapsuleGlassView: NSGlassEffectView {
     let dragSurface: CapsuleDragSurfaceView
+    let deviceRealityView: DeviceRealityView
 
     override init(frame frameRect: NSRect) {
         let contentHost = NSView(frame: CGRect(origin: .zero, size: frameRect.size))
         dragSurface = CapsuleDragSurfaceView(frame: contentHost.bounds)
+        deviceRealityView = DeviceRealityView(frame: contentHost.bounds)
         super.init(frame: frameRect)
 
         style = .clear
@@ -15,7 +17,9 @@ final class CapsuleGlassView: NSGlassEffectView {
         autoresizingMask = [.width, .height]
 
         contentHost.autoresizingMask = [.width, .height]
+        deviceRealityView.autoresizingMask = [.width, .height]
         dragSurface.autoresizingMask = [.width, .height]
+        contentHost.addSubview(deviceRealityView)
         contentHost.addSubview(dragSurface)
         contentView = contentHost
     }
