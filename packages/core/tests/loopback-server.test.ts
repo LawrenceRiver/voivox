@@ -5,9 +5,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   createVoivoxLoopbackServer,
-  VOIVOX_EXTENSION_ORIGIN,
+  VOIVOX_AUTOMATION_EXTENSION_ORIGIN,
+  VOIVOX_STORE_EXTENSION_ORIGIN,
   type VoivoxLoopbackServer
 } from '../src/loopback-server.js';
+
+const VOIVOX_EXTENSION_ORIGIN = VOIVOX_STORE_EXTENSION_ORIGIN;
 import { VoiceVacError } from '../src/voice-vac-error.js';
 
 describe('Voice Vac loopback API', () => {
@@ -15,6 +18,43 @@ describe('Voice Vac loopback API', () => {
 
   afterEach(async () => {
     await server?.close();
+  });
+
+  it.each([
+    VOIVOX_STORE_EXTENSION_ORIGIN,
+    VOIVOX_AUTOMATION_EXTENSION_ORIGIN
+  ])('echoes only the exact allowed extension origin %s', async (origin) => {
+    server = await createVoivoxLoopbackServer({
+      token: 'desktop-only-token',
+      extensionToken: 'chrome-bridge-token'
+    });
+
+    const response = await fetch(`${server.baseUrl}/v1/extension/tunnel-sessions`, {
+      headers: {
+        authorization: 'Bearer chrome-bridge-token',
+        origin
+      }
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('access-control-allow-origin')).toBe(origin);
+    expect(response.headers.get('vary')).toContain('Origin');
+  });
+
+  it('rejects every other extension origin without a CORS echo', async () => {
+    server = await createVoivoxLoopbackServer({
+      token: 'desktop-only-token',
+      extensionToken: 'chrome-bridge-token'
+    });
+    const response = await fetch(`${server.baseUrl}/v1/extension/tunnel-sessions`, {
+      headers: {
+        authorization: 'Bearer chrome-bridge-token',
+        origin: 'chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+      }
+    });
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
   });
 
   it('keeps capture controls behind the local bearer token', async () => {

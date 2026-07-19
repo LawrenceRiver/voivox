@@ -16,7 +16,12 @@ import type { TranscriptResult } from './pvtt-contract.js';
 import { serializeVoiceVacError } from './voice-vac-error.js';
 import { VOICE_VAC_ERROR_CODES } from './voice-vac-error.js';
 
-export const VOIVOX_EXTENSION_ORIGIN = 'chrome-extension://pepfpbobjbjehhhcjiokmneclohlffno';
+export const VOIVOX_STORE_EXTENSION_ORIGIN = 'chrome-extension://pepfpbobjbjehhhcjiokmneclohlffno';
+export const VOIVOX_AUTOMATION_EXTENSION_ORIGIN = 'chrome-extension://ciijinidnlbokpbeiabifcnoighmbnmh';
+export const VOIVOX_EXTENSION_ORIGINS = new Set([
+  VOIVOX_STORE_EXTENSION_ORIGIN,
+  VOIVOX_AUTOMATION_EXTENSION_ORIGIN
+]);
 export const VOIVOX_VERSION = '0.1.1';
 const NATIVE_PROOF_PATH = '/v1/native/proof';
 const NATIVE_PROOF_PROTOCOL_VERSION = 1;
@@ -96,8 +101,9 @@ export async function createVoivoxLoopbackServer(options: {
   const server = createServer(async (request, response) => {
     try {
       if (request.method === 'GET' && request.url === '/health') {
-        if (request.headers.origin === VOIVOX_EXTENSION_ORIGIN) {
-          applyExtensionCors(response);
+        const origin = request.headers.origin;
+        if (origin && VOIVOX_EXTENSION_ORIGINS.has(origin)) {
+          applyExtensionCors(response, origin);
         }
         sendJson(response, 200, {
           service: 'voivox',
@@ -171,11 +177,12 @@ export async function createVoivoxLoopbackServer(options: {
       }
 
       if (request.url?.startsWith('/v1/extension/')) {
-        if (request.headers.origin !== VOIVOX_EXTENSION_ORIGIN) {
+        const origin = request.headers.origin;
+        if (!origin || !VOIVOX_EXTENSION_ORIGINS.has(origin)) {
           sendJson(response, 403, { error: 'This Voice Vac extension origin is not allowed.' });
           return;
         }
-        applyExtensionCors(response);
+        applyExtensionCors(response, origin);
 
         if (request.method === 'OPTIONS') {
           response.writeHead(204);
@@ -406,8 +413,8 @@ function resolveCapabilities(
   return { ...resolved };
 }
 
-function applyExtensionCors(response: ServerResponse): void {
-  response.setHeader('access-control-allow-origin', VOIVOX_EXTENSION_ORIGIN);
+function applyExtensionCors(response: ServerResponse, origin: string): void {
+  response.setHeader('access-control-allow-origin', origin);
   response.setHeader('access-control-allow-methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   response.setHeader('access-control-allow-headers', 'authorization, content-type');
   response.setHeader('vary', 'Origin');

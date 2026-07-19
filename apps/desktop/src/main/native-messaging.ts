@@ -6,7 +6,12 @@ import { basename, dirname, isAbsolute, join } from 'node:path';
 import type { LocalAsrStatus } from '@voivox/core';
 
 export const NATIVE_MESSAGING_HOST_NAME = 'com.voivox.bridge';
-export const VOIVOX_EXTENSION_ORIGIN = 'chrome-extension://pepfpbobjbjehhhcjiokmneclohlffno/';
+export const VOIVOX_STORE_EXTENSION_ORIGIN = 'chrome-extension://pepfpbobjbjehhhcjiokmneclohlffno/';
+export const VOIVOX_AUTOMATION_EXTENSION_ORIGIN = 'chrome-extension://ciijinidnlbokpbeiabifcnoighmbnmh/';
+export const VOIVOX_NATIVE_EXTENSION_ORIGINS = [
+  VOIVOX_STORE_EXTENSION_ORIGIN,
+  VOIVOX_AUTOMATION_EXTENSION_ORIGIN
+] as const;
 
 const NATIVE_MESSAGING_DIRECTORIES = [
   'Library/Application Support/Google/Chrome/NativeMessagingHosts',
@@ -76,7 +81,7 @@ export async function installNativeMessagingHost(options: {
   }
 
   const manifest = {
-    allowed_origins: [VOIVOX_EXTENSION_ORIGIN],
+    allowed_origins: [...VOIVOX_NATIVE_EXTENSION_ORIGINS],
     description: 'Voice Vac local desktop discovery bridge',
     name: NATIVE_MESSAGING_HOST_NAME,
     path: options.executablePath,

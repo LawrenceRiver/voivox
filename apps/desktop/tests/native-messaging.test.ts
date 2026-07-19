@@ -9,7 +9,7 @@ import {
   createExtensionConnectionPublisher,
   installNativeMessagingHost,
   NATIVE_MESSAGING_HOST_NAME,
-  VOIVOX_EXTENSION_ORIGIN
+  VOIVOX_NATIVE_EXTENSION_ORIGINS
 } from '../src/main/native-messaging.js';
 
 const temporaryDirectories: string[] = [];
@@ -92,7 +92,7 @@ describe('Chrome native messaging host installation', () => {
     ]);
     for (const manifestPath of manifestPaths) {
       expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toEqual({
-        allowed_origins: [VOIVOX_EXTENSION_ORIGIN],
+        allowed_origins: VOIVOX_NATIVE_EXTENSION_ORIGINS,
         description: 'Voice Vac local desktop discovery bridge',
         name: NATIVE_MESSAGING_HOST_NAME,
         path: executablePath,
