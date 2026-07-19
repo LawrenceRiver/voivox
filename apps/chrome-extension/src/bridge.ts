@@ -7,6 +7,10 @@ export type BridgeConfig = {
 
 export type CaptureErrorCode = 'transcription-cancelled' | 'transcription-timeout';
 
+export type TunnelPoint = { screenX: number; screenY: number };
+export type TunnelRect = { x: number; y: number; width: number; height: number };
+export type TunnelLinkState = 'idle' | 'dragging' | 'detecting' | 'ready' | 'transcribing' | 'paused' | 'completed' | 'error';
+
 export type CaptureState = {
   active: boolean;
   canRetry?: boolean;
@@ -16,9 +20,15 @@ export type CaptureState = {
   route?: Exclude<TranscriptionRoute, 'unavailable'>;
   sessionId?: string;
   tabTitle?: string;
+  tabUrl?: string;
   error?: string;
   errorCode?: CaptureErrorCode;
   transcript?: string;
+  linkState?: TunnelLinkState;
+  targetRect?: TunnelRect;
+  pageEndpoint?: TunnelPoint;
+  appEndpoint?: TunnelPoint;
+  tunnelSessionId?: string;
 };
 
 const bridgeKey = 'voivoxBridge';
@@ -66,7 +76,13 @@ export function normalizeCaptureState(value: unknown): CaptureState {
   if (record.route === 'browser-local') state.route = record.route;
   if (typeof record.sessionId === 'string') state.sessionId = record.sessionId;
   if (typeof record.tabTitle === 'string') state.tabTitle = record.tabTitle;
+  if (typeof record.tabUrl === 'string') state.tabUrl = record.tabUrl;
   if (typeof record.transcript === 'string') state.transcript = record.transcript;
+  if (isTunnelLinkState(record.linkState)) state.linkState = record.linkState;
+  if (isTunnelRect(record.targetRect)) state.targetRect = record.targetRect;
+  if (isTunnelPoint(record.pageEndpoint)) state.pageEndpoint = record.pageEndpoint;
+  if (isTunnelPoint(record.appEndpoint)) state.appEndpoint = record.appEndpoint;
+  if (typeof record.tunnelSessionId === 'string') state.tunnelSessionId = record.tunnelSessionId;
   return state;
 }
 
@@ -81,4 +97,26 @@ function isCapturePhase(value: unknown): value is CaptureState['phase'] {
     || value === 'transcribing'
     || value === 'complete'
     || value === 'error';
+}
+
+function isTunnelLinkState(value: unknown): value is TunnelLinkState {
+  return value === 'idle' || value === 'dragging' || value === 'detecting' || value === 'ready'
+    || value === 'transcribing' || value === 'paused' || value === 'completed' || value === 'error';
+}
+
+function isTunnelPoint(value: unknown): value is TunnelPoint {
+  if (!isRecord(value)) return false;
+  return Number.isFinite(value.screenX) && Number.isFinite(value.screenY);
+}
+
+function isTunnelRect(value: unknown): value is TunnelRect {
+  if (!isRecord(value)) return false;
+  const x = value.x;
+  const y = value.y;
+  const width = value.width;
+  const height = value.height;
+  return typeof x === 'number' && Number.isFinite(x)
+    && typeof y === 'number' && Number.isFinite(y)
+    && typeof width === 'number' && Number.isFinite(width) && width >= 0
+    && typeof height === 'number' && Number.isFinite(height) && height >= 0;
 }

@@ -1,7 +1,8 @@
-import { VoivoxService, type CaptureSession, type CaptureSource } from '@voivox/core';
+import { CrossWindowSessionStore, VoivoxService, type CaptureSession, type CaptureSource } from '@voivox/core';
 
 export class DesktopRuntime {
   private readonly service: VoivoxService;
+  private readonly tunnelSessions = new CrossWindowSessionStore();
 
   constructor(service = new VoivoxService()) {
     this.service = service;
@@ -19,7 +20,7 @@ export class DesktopRuntime {
     this.service.appendRawSegment(sessionId, {
       startMs: 0,
       endMs: 1_200,
-      text: 'VOIVOX 已收到一段本机测试转写。'
+      text: 'Voice Vac 已收到一段本机测试转写。'
     });
   }
 
@@ -32,5 +33,9 @@ export class DesktopRuntime {
 
   getService(): VoivoxService {
     return this.service;
+  }
+
+  getTunnelSessions(): CrossWindowSessionStore {
+    return this.tunnelSessions;
   }
 }

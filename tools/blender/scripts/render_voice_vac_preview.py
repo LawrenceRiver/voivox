@@ -1,9 +1,15 @@
 import bpy
 import math
 import os
+import sys
 from mathutils import Vector
 
-output = os.environ.get("VOICE_VAC_PREVIEW", "/tmp/voice-vac-machine-preview.png")
+arguments = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+asset_index = arguments.index("--asset") + 1 if "--asset" in arguments else -1
+if asset_index > 0 and asset_index < len(arguments):
+    bpy.ops.wm.open_mainfile(filepath=os.path.abspath(arguments[asset_index]))
+output_index = arguments.index("--output") + 1 if "--output" in arguments else -1
+output = arguments[output_index] if output_index > 0 and output_index < len(arguments) else os.environ.get("VOICE_VAC_PREVIEW", "/tmp/voice-vac-machine-preview.png")
 bpy.ops.object.camera_add(location=(0.0, -19.0, -1.6), rotation=(math.radians(82.0), 0.0, 0.0))
 camera = bpy.context.object
 camera.data.lens = 48

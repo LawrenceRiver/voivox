@@ -27,7 +27,7 @@ import { enforceSingleInstance } from '../src/main/single-instance.js';
 import { readWavDuration } from '../src/main/wav-duration.js';
 import { resolveBundledResource, resolveElectronEntryPoints } from './resource-paths.js';
 
-app.setName('VOIVOX');
+app.setName('Voice Vac');
 let window: BrowserWindow | undefined;
 let loopback: Awaited<ReturnType<typeof createVoivoxLoopbackServer>> | undefined;
 let asrEngine: PythonQwenAsrEngine | undefined;
@@ -57,7 +57,7 @@ async function bootstrap(): Promise<void> {
   });
   const asrPipeline = new BufferedAsrPipeline(runtime.getService(), asrEngine, {
     onError: (error) => {
-      console.error('VOIVOX local ASR error:', error.message);
+      console.error('Voice Vac local ASR error:', error.message);
       window?.webContents.send('voivox:asr-error', error.message);
     }
   });
@@ -83,10 +83,10 @@ async function bootstrap(): Promise<void> {
         });
       }
     } catch (error) {
-      console.error('VOIVOX process recording transcription error:', error);
+      console.error('Voice Vac process recording transcription error:', error);
       window?.webContents.send(
         'voivox:asr-error',
-        error instanceof Error ? error.message : 'VOIVOX 无法转写这个 macOS 应用的录音。'
+        error instanceof Error ? error.message : 'Voice Vac 无法转写这个 macOS 应用的录音。'
       );
     } finally {
       await rm(dirname(audioPath), { force: true, recursive: true });
@@ -109,6 +109,7 @@ async function bootstrap(): Promise<void> {
         localAsr: localAsrProbe.getStatus()
       }),
       service: runtime.getService(),
+      tunnelSessions: runtime.getTunnelSessions(),
       listMacProcesses: () => processTapHost.listProcesses(),
       onCaptureStarted: async (session) => {
         if (session.source.kind !== 'macos-process') {
@@ -139,7 +140,7 @@ async function bootstrap(): Promise<void> {
   });
   nativeMessagingReady = nativeMessagingInstallation.installed.length > 0;
   for (const failure of nativeMessagingInstallation.failed) {
-    console.warn(`VOIVOX could not install a browser native host manifest at ${failure.path}: ${failure.reason}`);
+    console.warn(`Voice Vac could not install a browser native host manifest at ${failure.path}: ${failure.reason}`);
   }
   extensionConnectionPublisher = createExtensionConnectionPublisher({
     baseUrl: loopback.baseUrl,
@@ -150,7 +151,7 @@ async function bootstrap(): Promise<void> {
   void localAsrProbe.completion
     .then((localAsr) => extensionConnectionPublisher?.publish(localAsr))
     .catch((error: unknown) => {
-      console.error('VOIVOX could not update extension discovery:', error);
+      console.error('Voice Vac could not update extension discovery:', error);
     });
   registerIpc(runtime, {
     asrPipeline,
@@ -172,9 +173,10 @@ function registerIpc(
 ): void {
   ipcMain.handle('voivox:get-capabilities', () => options.getCapabilities());
   ipcMain.handle('voivox:get-dashboard', () => runtime.getDashboard());
+  ipcMain.handle('voivox:get-tunnel-sessions', () => runtime.getTunnelSessions().list());
   ipcMain.handle('voivox:set-capture-mode', (_event, mode: unknown) => {
     if (mode !== 'fast' && mode !== 'normal') {
-      throw new Error('VOIVOX capture mode must be fast or normal.');
+      throw new Error('Voice Vac capture mode must be fast or normal.');
     }
     options.asrPipeline.setMinimumWindowMs(mode === 'fast' ? 4_000 : 8_000);
   });
@@ -197,14 +199,14 @@ function registerIpc(
   });
   ipcMain.handle('voivox:stop-capture', async (_event, sessionId: unknown) => {
     if (typeof sessionId !== 'string') {
-      throw new Error('A VOIVOX session id is required.');
+      throw new Error('A Voice Vac session id is required.');
     }
     await options.onCaptureStopping(sessionId);
     runtime.stopCapture(sessionId);
   });
   ipcMain.handle('voivox:append-demo-segment', (_event, sessionId: unknown) => {
     if (typeof sessionId !== 'string') {
-      throw new Error('A VOIVOX session id is required.');
+      throw new Error('A Voice Vac session id is required.');
     }
     runtime.appendDemoSegment(sessionId);
   });
@@ -213,13 +215,19 @@ function registerIpc(
 function createWindow(): void {
   const entryPoints = resolveElectronEntryPoints(import.meta.url);
   window = new BrowserWindow({
-    backgroundColor: '#f3f4f0',
-    height: 760,
-    minHeight: 620,
-    minWidth: 760,
+    alwaysOnTop: true,
+    backgroundColor: '#00ffffff',
+    height: 210,
+    minHeight: 185,
+    minWidth: 520,
     show: false,
-    title: 'VOIVOX',
-    width: 1120,
+    title: 'Voice Vac',
+    titleBarStyle: 'hiddenInset',
+    transparent: true,
+    vibrancy: 'popover',
+    visualEffectState: 'active',
+    width: 640,
+    resizable: true,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -280,7 +288,7 @@ function assertSource(value: unknown): { kind: 'chrome-tab' | 'macos-process' | 
 
 if (isPrimaryInstance) {
   app.whenReady().then(bootstrap).catch((error: unknown) => {
-    console.error('VOIVOX could not start.', error);
+    console.error('Voice Vac could not start.', error);
     app.quit();
   });
 
@@ -301,7 +309,7 @@ if (isPrimaryInstance) {
 }
 
 function reportShutdownError(error: unknown): void {
-  console.error('VOIVOX shutdown cleanup failed:', error);
+  console.error('Voice Vac shutdown cleanup failed:', error);
 }
 
 async function shutdown(): Promise<void> {

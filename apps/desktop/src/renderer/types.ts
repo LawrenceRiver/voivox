@@ -2,6 +2,9 @@ export type DesktopCaptureSource = {
   kind: 'chrome-tab' | 'macos-process' | 'microphone';
   label: string;
   processId?: number;
+  title?: string;
+  url?: string;
+  language?: string;
 };
 
 export type DesktopSegment = {
@@ -23,7 +26,10 @@ export type DesktopDashboard = {
   sessions: DesktopSession[];
 };
 
+export type DesktopTunnelSession = CrossWindowSession;
+
 export type DesktopCapabilities = {
   extensionDiscovery: boolean;
   localAsr: 'checking' | 'ready' | 'missing';
 };
+import type { CrossWindowSession } from '@voivox/core';

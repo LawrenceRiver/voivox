@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { PvttStatus, TranscriptSegment, TranscriptionMode } from '@voivox/core';
 import { resolveLocale, translate, type Locale, type MessageKey } from '@voivox/i18n';
 
 import { deriveCapturePresentation } from './dashboard-state.js';
@@ -6,11 +7,13 @@ import { MacProcessPicker, type MacProcess } from './mac-process-picker.js';
 import { SessionList } from './session-list.js';
 import { SourceRail } from './source-rail.js';
 import { TranscriptPanel } from './transcript-panel.js';
+import { TunnelMachinePanel } from './tunnel-machine-panel.js';
 import type {
   DesktopCapabilities,
   DesktopCaptureSource,
   DesktopDashboard,
-  DesktopSession
+  DesktopSession,
+  DesktopTunnelSession
 } from './types.js';
 
 export type DesktopClient = {
@@ -22,9 +25,9 @@ export type DesktopClient = {
   appendDemoSegment: (sessionId: string) => Promise<void>;
   listMacProcesses?: () => Promise<MacProcess[]>;
   onAsrError?: (listener: (message: string) => void) => () => void;
+  getTunnelSessions?: () => Promise<DesktopTunnelSession[]>;
 };
 
-const mascotUrl = new URL('../../build/icon.png', import.meta.url).href;
 const defaultCapabilities: DesktopCapabilities = {
   extensionDiscovery: false,
   localAsr: 'checking'
@@ -43,6 +46,7 @@ function initialLocale(): Locale {
 export function App({ desktopClient }: { desktopClient: DesktopClient }) {
   const [locale, setLocale] = useState<Locale>(initialLocale);
   const [dashboard, setDashboard] = useState<DesktopDashboard>({ sessions: [] });
+  const [tunnelSessions, setTunnelSessions] = useState<DesktopTunnelSession[]>([]);
   const [capabilities, setCapabilities] = useState<DesktopCapabilities>(defaultCapabilities);
   const [coreConnected, setCoreConnected] = useState(false);
   const [source, setSource] = useState<DesktopCaptureSource>(() => ({
@@ -55,6 +59,8 @@ export function App({ desktopClient }: { desktopClient: DesktopClient }) {
   const [connectionError, setConnectionError] = useState<string>();
   const [instruction, setInstruction] = useState<string>();
   const [isWorking, setIsWorking] = useState(false);
+  const [mode, setMode] = useState<TranscriptionMode>('auto');
+  const [transcriptCleared, setTranscriptCleared] = useState(false);
   const [processPicker, setProcessPicker] = useState<{
     error?: string;
     loading: boolean;
@@ -74,10 +80,10 @@ export function App({ desktopClient }: { desktopClient: DesktopClient }) {
     [dashboard.activeSession, locale, source.kind, source.label]
   );
   const transcriptSession = useMemo(
-    () => dashboard.activeSession
+    () => transcriptCleared ? undefined : dashboard.activeSession
       ?? dashboard.sessions.find((session) => session.id === selectedSessionId)
       ?? dashboard.sessions[0],
-    [dashboard.activeSession, dashboard.sessions, selectedSessionId]
+    [dashboard.activeSession, dashboard.sessions, selectedSessionId, transcriptCleared]
   );
 
   useEffect(() => {
@@ -129,6 +135,22 @@ export function App({ desktopClient }: { desktopClient: DesktopClient }) {
   }, [desktopClient, locale]);
 
   useEffect(() => {
+    if (!desktopClient.getTunnelSessions) return undefined;
+    let cancelled = false;
+    const load = async (): Promise<void> => {
+      try {
+        const sessions = await desktopClient.getTunnelSessions?.();
+        if (!cancelled && sessions) setTunnelSessions(sessions);
+      } catch {
+        // The standalone capsule remains usable when the browser bridge is closed.
+      }
+    };
+    void load();
+    const interval = setInterval(() => void load(), 800);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [desktopClient]);
+
+  useEffect(() => {
     if (!desktopClient.getCapabilities) {
       return undefined;
     }
@@ -161,6 +183,7 @@ export function App({ desktopClient }: { desktopClient: DesktopClient }) {
   useEffect(() => {
     if (dashboard.activeSession) {
       setSelectedSessionId(dashboard.activeSession.id);
+      setTranscriptCleared(false);
     }
   }, [dashboard.activeSession]);
 
@@ -189,6 +212,7 @@ export function App({ desktopClient }: { desktopClient: DesktopClient }) {
       } else {
         const started = await desktopClient.startCapture(source);
         setSelectedSessionId(started.id);
+        setTranscriptCleared(false);
       }
       await refresh();
     } catch {
@@ -226,16 +250,62 @@ export function App({ desktopClient }: { desktopClient: DesktopClient }) {
     setLocale((current) => current === 'zh-CN' ? 'en' : 'zh-CN');
   }
 
+  function handleModeChange(nextMode: TranscriptionMode): void {
+    setMode(nextMode);
+    if (nextMode !== 'auto') {
+      void desktopClient.setCaptureMode?.(nextMode === 'accelerated' ? 'fast' : 'normal');
+    }
+  }
+
+  function handleCopy(): void {
+    const text = transcriptSession?.rawSegments?.map((segment) => segment.text).join(' ').trim() ?? '';
+    if (!text) return;
+    void navigator.clipboard?.writeText(text);
+  }
+
+  function handleClear(): void {
+    setTranscriptCleared(true);
+    setSelectedSessionId(undefined);
+  }
+
+  function handleRetry(): void {
+    setTranscriptCleared(false);
+    setActionError(undefined);
+    if (source.kind !== 'chrome-tab' && !capturing) {
+      void handleCapture();
+    }
+  }
+
   const capturing = dashboard.activeSession?.status === 'capturing';
   const macModelUnavailable = source.kind === 'macos-process' && capabilities.localAsr !== 'ready' && !capturing;
   const displayedError = asrError ?? actionError ?? connectionError;
+  const linkedTarget = tunnelSessions.at(-1);
+  const tunnelState: PvttStatus = displayedError
+    ? 'failed'
+    : capturing
+      ? 'transcribing'
+      : transcriptSession?.status === 'complete'
+        ? 'completed'
+        : linkedTarget?.state === 'transcribing'
+          ? 'transcribing'
+          : linkedTarget?.state === 'ready'
+            ? 'ready'
+            : source.kind === 'chrome-tab'
+              ? 'idle'
+              : 'ready';
+  const tunnelSegments: TranscriptSegment[] = transcriptSession?.rawSegments?.map((segment) => ({
+    start: segment.startMs / 1_000,
+    end: segment.endMs / 1_000,
+    text: segment.text
+  })) ?? [];
+  const tunnelTranscript = tunnelSegments.map((segment) => segment.text).join(' ');
 
   return (
     <main className="app-shell" id="top">
       <header className="app-header">
-        <a aria-label="VOIVOX" className="brand" href="#top">
+        <a aria-label="Voice Vac" className="brand" href="#top">
           <span aria-hidden="true" className="brand-mark"><i /><i /><i /></span>
-          <span>VOI<strong>VOX</strong></span>
+          <span>Voice <strong>Vac</strong></span>
         </a>
         <button
           aria-label={t(locale === 'zh-CN' ? 'desktop.language.switchEnglish' : 'desktop.language.switchChinese')}
@@ -250,24 +320,31 @@ export function App({ desktopClient }: { desktopClient: DesktopClient }) {
       </header>
 
       <div className="app-canvas">
-        <section className="hero-card">
-          <div className="hero-copy">
-            <span className="eyebrow">{t('desktop.hero.eyebrow')}</span>
-            <h1>{t('desktop.hero.title')}</h1>
-            <p>{t('desktop.hero.description')}</p>
-            <span className="privacy-note"><i aria-hidden="true" />{t('privacy.localOnly')}</span>
-          </div>
-          <div aria-hidden="true" className="mascot-stage">
-            <span className="sound-ribbon ribbon-one" />
-            <span className="sound-ribbon ribbon-two" />
-            <span className="sound-ribbon ribbon-three" />
-            <img alt="" src={mascotUrl} />
-            <span className="mascot-status-light" />
-          </div>
-          <img alt={t('desktop.mascotAlt')} className="accessible-mascot" src={mascotUrl} />
-        </section>
+        <TunnelMachinePanel
+          locale={locale}
+          mode={mode}
+          onClear={handleClear}
+          onCopy={handleCopy}
+          onModeChange={handleModeChange}
+          onPrimaryAction={() => void handleCapture()}
+          onRetry={handleRetry}
+          onStop={() => void handleCapture()}
+          onTargetDrop={() => setInstruction(t('desktop.capture.chromeInstruction'))}
+          segments={tunnelSegments}
+          source={transcriptSession ? {
+            title: transcriptSession.source.label,
+            ...(transcriptSession.source.url ? { url: transcriptSession.source.url } : {})
+          } : linkedTarget ? {
+            title: linkedTarget.title ?? (locale === 'zh-CN' ? '当前视频' : 'Current video'),
+            ...(linkedTarget.url ? { url: linkedTarget.url } : {})
+          } : undefined}
+          state={tunnelState}
+          transcript={tunnelTranscript}
+        />
 
-        <div className="workspace-grid">
+        <details className="legacy-workspace">
+          <summary>{locale === 'zh-CN' ? '打开传统诊断面板' : 'Open legacy diagnostics'}</summary>
+          <div className="workspace-grid">
           <section className="capture-console">
             <SourceRail
               disabled={!presentation.canChangeSource || isWorking}
@@ -308,7 +385,7 @@ export function App({ desktopClient }: { desktopClient: DesktopClient }) {
               </div>
             </section>
 
-            <TranscriptPanel locale={locale} session={transcriptSession} />
+            <TranscriptPanel locale={locale} session={undefined} />
           </section>
 
           <aside className="status-column">
@@ -320,7 +397,8 @@ export function App({ desktopClient }: { desktopClient: DesktopClient }) {
               sessions={dashboard.sessions}
             />
           </aside>
-        </div>
+          </div>
+        </details>
       </div>
 
       {processPicker.open ? (

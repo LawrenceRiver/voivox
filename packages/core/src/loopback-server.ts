@@ -1,7 +1,16 @@
 import { createHmac } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 
-import { type CaptureSession, VoivoxService } from './voivox-service.js';
+import {
+  type ActiveVideoTranscriptionOptions,
+  type CaptureSession,
+  VoivoxService
+} from './voivox-service.js';
+import {
+  CrossWindowSessionStore,
+  type CrossWindowSessionPatch
+} from './cross-window-session.js';
+import type { TranscriptResult } from './pvtt-contract.js';
 
 export const VOIVOX_EXTENSION_ORIGIN = 'chrome-extension://pepfpbobjbjehhhcjiokmneclohlffno';
 export const VOIVOX_VERSION = '0.1.1';
@@ -31,6 +40,8 @@ export type MacAudioProcess = {
   pid: number;
 };
 
+export type ActiveVideoTranscriptionRequest = ActiveVideoTranscriptionOptions;
+
 export async function createVoivoxLoopbackServer(options: {
   token: string;
   port?: number;
@@ -40,8 +51,13 @@ export async function createVoivoxLoopbackServer(options: {
   listMacProcesses?: () => Promise<MacAudioProcess[]>;
   onCaptureStarted?: (session: CaptureSession) => void | Promise<void>;
   onCaptureStopping?: (sessionId: string) => void | Promise<void>;
+  onActiveVideoTranscription?: (
+    request: ActiveVideoTranscriptionRequest
+  ) => Promise<TranscriptResult | undefined>;
+  tunnelSessions?: CrossWindowSessionStore;
 }): Promise<VoivoxLoopbackServer> {
   const service = options.service ?? new VoivoxService();
+  const tunnelSessions = options.tunnelSessions ?? new CrossWindowSessionStore();
   let actualBaseUrl: string | undefined;
   const server = createServer(async (request, response) => {
     try {
@@ -64,16 +80,16 @@ export async function createVoivoxLoopbackServer(options: {
       if (requestUrl?.pathname === MCP_PROOF_PATH) {
         if (request.method !== 'GET') {
           response.setHeader('allow', 'GET');
-          sendJson(response, 405, { error: 'VOIVOX MCP proof requires GET.' });
+          sendJson(response, 405, { error: 'Voice Vac MCP proof requires GET.' });
           return;
         }
         const challenge = parseMcpProofChallenge(requestUrl);
         if (!challenge) {
-          sendJson(response, 400, { error: 'A valid VOIVOX MCP proof challenge is required.' });
+          sendJson(response, 400, { error: 'A valid Voice Vac MCP proof challenge is required.' });
           return;
         }
         if (!actualBaseUrl) {
-          sendJson(response, 503, { error: 'VOIVOX MCP proof is unavailable.' });
+          sendJson(response, 503, { error: 'Voice Vac MCP proof is unavailable.' });
           return;
         }
 
@@ -93,16 +109,16 @@ export async function createVoivoxLoopbackServer(options: {
       if (requestUrl?.pathname === NATIVE_PROOF_PATH) {
         if (request.method !== 'GET') {
           response.setHeader('allow', 'GET');
-          sendJson(response, 405, { error: 'VOIVOX native proof requires GET.' });
+          sendJson(response, 405, { error: 'Voice Vac native proof requires GET.' });
           return;
         }
         const challenge = parseNativeProofChallenge(requestUrl);
         if (!challenge) {
-          sendJson(response, 400, { error: 'A valid VOIVOX native proof challenge is required.' });
+          sendJson(response, 400, { error: 'A valid Voice Vac native proof challenge is required.' });
           return;
         }
         if (!options.extensionToken || !actualBaseUrl) {
-          sendJson(response, 503, { error: 'VOIVOX native proof is unavailable.' });
+          sendJson(response, 503, { error: 'Voice Vac native proof is unavailable.' });
           return;
         }
 
@@ -122,7 +138,7 @@ export async function createVoivoxLoopbackServer(options: {
 
       if (request.url?.startsWith('/v1/extension/')) {
         if (request.headers.origin !== VOIVOX_EXTENSION_ORIGIN) {
-          sendJson(response, 403, { error: 'This VOIVOX extension origin is not allowed.' });
+          sendJson(response, 403, { error: 'This Voice Vac extension origin is not allowed.' });
           return;
         }
         applyExtensionCors(response);
@@ -134,7 +150,7 @@ export async function createVoivoxLoopbackServer(options: {
         }
 
         if (!options.extensionToken || !isAuthorized(request, options.extensionToken)) {
-          sendJson(response, 401, { error: 'VOIVOX Chrome bridge token required.' });
+          sendJson(response, 401, { error: 'Voice Vac Chrome bridge token required.' });
           return;
         }
 
@@ -142,7 +158,7 @@ export async function createVoivoxLoopbackServer(options: {
           const body = await readJson(request);
           if (!isBrowserTranscriptImport(body)) {
             sendJson(response, 400, {
-              error: 'VOIVOX browser transcript import requires a Chrome tab, local text, and a duration up to 10 minutes.'
+              error: 'Voice Vac browser transcript import requires a Chrome tab, local text, and a duration up to 10 minutes.'
             });
             return;
           }
@@ -152,18 +168,22 @@ export async function createVoivoxLoopbackServer(options: {
             201,
             service.importCompletedCapture(
               body.source,
-              [{ startMs: 0, endMs: body.durationMs, text: body.transcript }]
+              [{ startMs: 0, endMs: body.durationMs, text: body.transcript }],
+              'live_tunnel'
             )
           );
           return;
         }
 
-        sendJson(response, 404, { error: 'Unknown VOIVOX Chrome bridge endpoint.' });
+        const extensionTunnelResponse = await handleTunnelSessionRequest(request, response, tunnelSessions, true);
+        if (extensionTunnelResponse) return;
+
+        sendJson(response, 404, { error: 'Unknown Voice Vac Chrome bridge endpoint.' });
         return;
       }
 
       if (!isAuthorized(request, options.token)) {
-        sendJson(response, 401, { error: 'Local VOIVOX bearer token required.' });
+        sendJson(response, 401, { error: 'Local Voice Vac bearer token required.' });
         return;
       }
 
@@ -175,6 +195,38 @@ export async function createVoivoxLoopbackServer(options: {
         return;
       }
 
+      const tunnelResponse = await handleTunnelSessionRequest(request, response, tunnelSessions, false);
+      if (tunnelResponse) return;
+
+      if (request.method === 'POST' && request.url === '/v1/transcriptions/active-video') {
+        const body = await readJson(request);
+        if (!isActiveVideoTranscriptionRequest(body)) {
+          sendJson(response, 400, { error: 'A valid Voice Vac active-video transcription request is required.' });
+          return;
+        }
+        const result = await (options.onActiveVideoTranscription?.(body)
+          ?? Promise.resolve(service.getLatestBrowserTranscript()));
+        if (!result) {
+          sendJson(response, 409, {
+            code: 'PVTT_NO_ACTIVE_VIDEO',
+            error: 'No completed browser video is registered. Start Voice Vac on the target tab, then try again.'
+          });
+          return;
+        }
+        sendJson(response, 200, result);
+        return;
+      }
+
+      if (request.method === 'GET' && request.url === '/v1/transcripts/latest') {
+        const result = service.getLatestBrowserTranscript();
+        if (!result) {
+          sendJson(response, 404, { code: 'PVTT_NO_TRANSCRIPT', error: 'No browser transcript is available yet.' });
+          return;
+        }
+        sendJson(response, 200, result);
+        return;
+      }
+
       if (request.method === 'GET' && request.url === '/v1/sessions') {
         sendJson(response, 200, { sessions: service.listSessions() });
         return;
@@ -182,7 +234,7 @@ export async function createVoivoxLoopbackServer(options: {
 
       if (request.method === 'GET' && request.url === '/v1/macos-processes') {
         if (!options.listMacProcesses) {
-          sendJson(response, 503, { error: 'VOIVOX macOS process capture is not available in this desktop app.' });
+          sendJson(response, 503, { error: 'Voice Vac macOS process capture is not available in this desktop app.' });
           return;
         }
         sendJson(response, 200, { processes: await options.listMacProcesses() });
@@ -236,7 +288,7 @@ export async function createVoivoxLoopbackServer(options: {
       if (request.method === 'GET' && exportMatch) {
         const session = service.getSession(decodeURIComponent(exportMatch[1]!));
         if (!session) {
-          sendJson(response, 404, { error: 'VOIVOX session not found.' });
+          sendJson(response, 404, { error: 'Voice Vac session not found.' });
           return;
         }
 
@@ -265,7 +317,7 @@ export async function createVoivoxLoopbackServer(options: {
       if (request.method === 'GET' && detailMatch) {
         const session = service.getSession(decodeURIComponent(detailMatch[1]!));
         if (!session) {
-          sendJson(response, 404, { error: 'VOIVOX session not found.' });
+          sendJson(response, 404, { error: 'Voice Vac session not found.' });
           return;
         }
 
@@ -273,7 +325,7 @@ export async function createVoivoxLoopbackServer(options: {
         return;
       }
 
-      sendJson(response, 404, { error: 'Unknown VOIVOX endpoint.' });
+      sendJson(response, 404, { error: 'Unknown Voice Vac endpoint.' });
     } catch (error) {
       sendJson(response, 400, {
         error: error instanceof Error ? error.message : 'Invalid request.'
@@ -285,7 +337,7 @@ export async function createVoivoxLoopbackServer(options: {
   const address = server.address();
 
   if (!address || typeof address === 'string') {
-    throw new Error('VOIVOX loopback server did not expose a TCP address.');
+    throw new Error('Voice Vac loopback server did not expose a TCP address.');
   }
 
   actualBaseUrl = `http://127.0.0.1:${address.port}`;
@@ -332,9 +384,103 @@ function resolveCapabilities(
 
 function applyExtensionCors(response: ServerResponse): void {
   response.setHeader('access-control-allow-origin', VOIVOX_EXTENSION_ORIGIN);
-  response.setHeader('access-control-allow-methods', 'POST, OPTIONS');
+  response.setHeader('access-control-allow-methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   response.setHeader('access-control-allow-headers', 'authorization, content-type');
   response.setHeader('vary', 'Origin');
+}
+
+async function handleTunnelSessionRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  store: CrossWindowSessionStore,
+  extension: boolean
+): Promise<boolean> {
+  const prefix = extension ? '/v1/extension/tunnel-sessions' : '/v1/tunnel-sessions';
+  if (!request.url?.startsWith(prefix)) return false;
+  const detailMatch = request.url.match(new RegExp(`^${prefix.replaceAll('/', '\\/')}\\/([^/]+)$`));
+  if (request.url === prefix && request.method === 'GET') {
+    sendJson(response, 200, { sessions: store.list() });
+    return true;
+  }
+  if (request.url === prefix && request.method === 'POST') {
+    const body = await readJson(request);
+    if (!isTunnelCreateRequest(body)) {
+      sendJson(response, 400, { error: 'A valid browser tab id is required to create a tunnel session.' });
+      return true;
+    }
+    const { tabId, ...initial } = body;
+    sendJson(response, 201, store.create(tabId, initial));
+    return true;
+  }
+  if (!detailMatch) {
+    response.setHeader('allow', 'GET, POST, PATCH, DELETE');
+    sendJson(response, 405, { error: 'Voice Vac tunnel session method is not supported.' });
+    return true;
+  }
+  const id = decodeURIComponent(detailMatch[1]!);
+  if (request.method === 'GET') {
+    const session = store.get(id);
+    if (!session) {
+      sendJson(response, 404, { error: 'Voice Vac tunnel session not found.' });
+      return true;
+    }
+    sendJson(response, 200, session);
+    return true;
+  }
+  if (request.method === 'PATCH') {
+    const body = await readJson(request);
+    if (!isTunnelPatch(body)) {
+      sendJson(response, 400, { error: 'Invalid Voice Vac tunnel session patch.' });
+      return true;
+    }
+    try {
+      sendJson(response, 200, store.update(id, body));
+    } catch (error) {
+      sendJson(response, 404, { error: error instanceof Error ? error.message : 'Voice Vac tunnel session not found.' });
+    }
+    return true;
+  }
+  if (request.method === 'DELETE') {
+    store.close(id);
+    response.writeHead(204);
+    response.end();
+    return true;
+  }
+  response.setHeader('allow', 'GET, PATCH, DELETE');
+  sendJson(response, 405, { error: 'Voice Vac tunnel session method is not supported.' });
+  return true;
+}
+
+function isTunnelCreateRequest(value: Record<string, unknown>): value is { tabId: number } & CrossWindowSessionPatch {
+  return isTunnelPatch(value) && typeof value.tabId === 'number' && Number.isInteger(value.tabId) && value.tabId >= 0;
+}
+
+function isTunnelPatch(value: Record<string, unknown>): value is CrossWindowSessionPatch {
+  if (value.id !== undefined || value.updatedAt !== undefined) return false;
+  if (value.tabId !== undefined && (typeof value.tabId !== 'number' || !Number.isInteger(value.tabId) || value.tabId < 0)) return false;
+  if (value.state !== undefined && !['idle', 'dragging', 'detecting', 'ready', 'transcribing', 'paused', 'completed', 'error'].includes(String(value.state))) return false;
+  if (value.title !== undefined && (typeof value.title !== 'string' || value.title.length > 500)) return false;
+  if (value.url !== undefined && (typeof value.url !== 'string' || value.url.length > 4_000)) return false;
+  if (value.appEndpoint !== undefined && !isTunnelPoint(value.appEndpoint)) return false;
+  if (value.pageEndpoint !== undefined && !isTunnelPoint(value.pageEndpoint)) return false;
+  if (value.targetRect !== undefined && !isTunnelRect(value.targetRect)) return false;
+  return true;
+}
+
+function isTunnelPoint(value: unknown): value is { screenX: number; screenY: number } {
+  if (!value || typeof value !== 'object') return false;
+  const point = value as { screenX?: unknown; screenY?: unknown };
+  return typeof point.screenX === 'number' && Number.isFinite(point.screenX)
+    && typeof point.screenY === 'number' && Number.isFinite(point.screenY);
+}
+
+function isTunnelRect(value: unknown): value is { x: number; y: number; width: number; height: number } {
+  if (!value || typeof value !== 'object') return false;
+  const rect = value as { x?: unknown; y?: unknown; width?: unknown; height?: unknown };
+  return typeof rect.x === 'number' && Number.isFinite(rect.x)
+    && typeof rect.y === 'number' && Number.isFinite(rect.y)
+    && typeof rect.width === 'number' && Number.isFinite(rect.width) && rect.width >= 0
+    && typeof rect.height === 'number' && Number.isFinite(rect.height) && rect.height >= 0;
 }
 
 function isAuthorized(request: IncomingMessage, token: string): boolean {
@@ -345,17 +491,45 @@ function isCaptureSource(value: unknown): value is {
   kind: 'chrome-tab' | 'macos-process' | 'microphone';
   label: string;
   processId?: number;
+  title?: string;
+  url?: string;
+  language?: string;
 } {
   if (!value || typeof value !== 'object') {
     return false;
   }
 
-  const source = value as { kind?: unknown; label?: unknown; processId?: unknown };
+  const source = value as {
+    kind?: unknown;
+    label?: unknown;
+    processId?: unknown;
+    title?: unknown;
+    url?: unknown;
+    language?: unknown;
+  };
   return (
     (source.kind === 'chrome-tab' || source.kind === 'macos-process' || source.kind === 'microphone') &&
     typeof source.label === 'string' &&
     source.label.length > 0 &&
-    (source.processId === undefined || (typeof source.processId === 'number' && Number.isInteger(source.processId) && source.processId > 0))
+    (source.processId === undefined || (typeof source.processId === 'number' && Number.isInteger(source.processId) && source.processId > 0)) &&
+    (source.title === undefined || (typeof source.title === 'string' && source.title.length <= 500)) &&
+    (source.url === undefined || (typeof source.url === 'string' && source.url.length <= 4_000)) &&
+    (source.language === undefined || (typeof source.language === 'string' && source.language.length <= 40))
+  );
+}
+
+function isActiveVideoTranscriptionRequest(value: unknown): value is ActiveVideoTranscriptionRequest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const request = value as Record<string, unknown>;
+  return (
+    (request.mode === 'auto' || request.mode === 'live' || request.mode === 'accelerated')
+    && typeof request.language === 'string'
+    && request.language.length > 0
+    && typeof request.timestamps === 'boolean'
+    && (request.output_format === 'text'
+      || request.output_format === 'json'
+      || request.output_format === 'srt'
+      || request.output_format === 'vtt')
   );
 }
 
@@ -400,7 +574,7 @@ function isDerivedTranscript(value: unknown): value is {
 }
 
 function isBrowserTranscriptImport(value: unknown): value is {
-  source: { kind: 'chrome-tab'; label: string };
+  source: { kind: 'chrome-tab'; label: string; title?: string; url?: string };
   durationMs: number;
   transcript: string;
 } {
@@ -447,7 +621,7 @@ function formatTime(totalMs: number): string {
 async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
   const declaredLength = Number(request.headers['content-length']);
   if (Number.isFinite(declaredLength) && declaredLength > MAXIMUM_JSON_BODY_BYTES) {
-    throw new Error('VOIVOX JSON request body is too large.');
+    throw new Error('Voice Vac JSON request body is too large.');
   }
   let body = '';
   let bodyBytes = 0;
@@ -455,7 +629,7 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
   for await (const chunk of request) {
     bodyBytes += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.byteLength;
     if (bodyBytes > MAXIMUM_JSON_BODY_BYTES) {
-      throw new Error('VOIVOX JSON request body is too large.');
+      throw new Error('Voice Vac JSON request body is too large.');
     }
     body += chunk;
   }

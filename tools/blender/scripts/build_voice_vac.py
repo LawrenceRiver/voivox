@@ -93,10 +93,26 @@ def sphere(name, location, scale, mat):
 def ribbed_hose(name, start, length, radius, mat, ribs=28, sides=24):
     vertices = []
     faces = []
+    fold_positions = (0.12, 0.24, 0.39, 0.53, 0.68, 0.81, 0.93)
     for i in range(ribs + 1):
         t = i / ribs
-        center = Vector((start[0] + 0.55 * math.sin(t * math.pi), start[1], start[2] - length * t))
-        tangent = Vector((0.55 * math.pi * math.cos(t * math.pi), 0.0, -length))
+        fold = sum(
+            math.exp(-((t - position) / 0.035) ** 2) * math.sin((t - position) * 58.0 + index * 0.9)
+            for index, position in enumerate(fold_positions)
+        )
+        # The hose is intentionally not a straight cylinder: it has a gentle
+        # multi-axis bow, deterministic local wrinkles, and small angle jitter
+        # so its collapsed shape reads like a soft game prop rather than a line.
+        center = Vector((
+            start[0] + 0.78 * math.sin(t * math.pi) + 0.09 * math.sin(t * math.pi * 4.0 + 0.7) + fold * 0.045,
+            start[1] + 0.14 * math.sin(t * math.pi * 2.0 + 0.4) + 0.06 * math.cos(t * math.pi * 5.0) + fold * 0.032,
+            start[2] - length * t + 0.08 * math.sin(t * math.pi * 3.0 + 1.1) + fold * 0.026
+        ))
+        tangent = Vector((
+            0.78 * math.pi * math.cos(t * math.pi) + 0.36 * math.pi * math.cos(t * math.pi * 4.0 + 0.7) + fold * 0.08,
+            0.28 * math.pi * math.cos(t * math.pi * 2.0 + 0.4) - 0.3 * math.pi * math.sin(t * math.pi * 5.0) + fold * 0.06,
+            -length + 0.24 * math.pi * math.cos(t * math.pi * 3.0 + 1.1) + fold * 0.018
+        ))
         tangent.normalize()
         n1 = tangent.cross(Vector((0.0, 1.0, 0.0))).normalized()
         n2 = tangent.cross(n1).normalized()

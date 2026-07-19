@@ -7,12 +7,32 @@ import {
 } from './bridge.js';
 import { chooseTranscriptionRoute, type TranscriptionMode } from './local-transcription.js';
 import { discoverNativeDesktop } from './native-discovery.js';
+import { syncTunnelSession } from './tunnel-session-sync.js';
 
 let operationTail: Promise<void> = Promise.resolve();
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.target !== 'service-worker') {
     return;
+  }
+
+  if (message.type === 'overlay:show') {
+    void showOverlayInCurrentTab()
+      .then((shown) => sendResponse({ shown }))
+      .catch((error: unknown) => sendResponse({
+        error: error instanceof Error ? error.message : '无法在当前网页显示 Voice Vac。'
+      }));
+    return true;
+  }
+
+  if (message.type === 'target:ready') {
+    void registerTargetSession(message, sender.tab?.id).then(() => sendResponse({ ok: true }));
+    return true;
+  }
+
+  if (message.type === 'target:preview') {
+    void previewTargetSession(message, sender.tab?.id).then(() => sendResponse({ ok: true }));
+    return true;
   }
 
   if (message.type === 'capture-state:get' || message.type === 'capture-state:save') {
@@ -69,8 +89,63 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 async function persistOffscreenCaptureState(value: unknown): Promise<CaptureState> {
   const state = normalizeCaptureState(value);
+  if (state.phase === 'complete') state.linkState = 'completed';
+  if (state.phase === 'error') state.linkState = 'error';
+  if (state.phase === 'transcribing' || state.phase === 'downloading') state.linkState = 'transcribing';
+  if (state.phase === 'idle' && !state.tunnelSessionId) state.linkState = 'idle';
+  if (state.tunnelSessionId) {
+    const discovery = await discoverNativeDesktop();
+    await syncTunnelSession({ discovery, sessionId: state.tunnelSessionId, state: state.linkState, tabId: 0 });
+  }
   await saveCaptureState(state);
   return state;
+}
+
+async function registerTargetSession(message: Record<string, unknown>, tabId: number | undefined): Promise<void> {
+  const current = await getCaptureState();
+  const next: CaptureState = {
+    ...current,
+    linkState: 'ready',
+    targetRect: isTunnelRect(message.targetRect) ? message.targetRect : current.targetRect,
+    pageEndpoint: isTunnelPoint(message.pageEndpoint) ? message.pageEndpoint : current.pageEndpoint,
+    tabTitle: typeof message.tabTitle === 'string' ? message.tabTitle : current.tabTitle,
+    tabUrl: typeof message.url === 'string' ? message.url : current.tabUrl
+  };
+  if (tabId !== undefined) {
+    const discovery = await discoverNativeDesktop();
+    next.tunnelSessionId = await syncTunnelSession({
+      discovery,
+      pageEndpoint: next.pageEndpoint,
+      state: 'ready',
+      tabId,
+      targetRect: next.targetRect,
+      title: next.tabTitle,
+      url: next.tabUrl
+    });
+  }
+  await saveCaptureState(next);
+}
+
+async function previewTargetSession(message: Record<string, unknown>, tabId: number | undefined): Promise<void> {
+  const current = await getCaptureState();
+  const next: CaptureState = {
+    ...current,
+    linkState: 'detecting',
+    targetRect: isTunnelRect(message.targetRect) ? message.targetRect : current.targetRect,
+    pageEndpoint: isTunnelPoint(message.pageEndpoint) ? message.pageEndpoint : current.pageEndpoint
+  };
+  if (current.tunnelSessionId && tabId !== undefined) {
+    const discovery = await discoverNativeDesktop();
+    await syncTunnelSession({
+      discovery,
+      pageEndpoint: next.pageEndpoint,
+      sessionId: current.tunnelSessionId,
+      state: 'detecting',
+      tabId,
+      targetRect: next.targetRect
+    });
+  }
+  await saveCaptureState(next);
 }
 
 async function toggleCapture(): Promise<CaptureState> {
@@ -92,7 +167,7 @@ async function toggleCapture(): Promise<CaptureState> {
       throw error;
     }
     if (!response?.state) {
-      throw new Error(response?.error ?? 'VOIVOX 没有确认停止收录。');
+      throw new Error(response?.error ?? 'Voice Vac 没有确认停止收录。');
     }
     return getCaptureState();
   }
@@ -119,7 +194,7 @@ async function cancelTranscription(current: CaptureState): Promise<CaptureState>
     throw error;
   }
   if (!response.state) {
-    throw new Error(response.error ?? 'VOIVOX 没有确认取消转写。');
+    throw new Error(response.error ?? 'Voice Vac 没有确认取消转写。');
   }
   return getCaptureState();
 }
@@ -147,6 +222,7 @@ async function startCapture(mode: TranscriptionMode): Promise<CaptureState> {
     route,
     streamId,
     tabTitle: tab.title ?? '当前 Chrome 标签页',
+    tabUrl: tab.url,
     target: 'offscreen',
     type: 'audio:start'
   }) as { error?: string; sessionId?: string };
@@ -154,8 +230,21 @@ async function startCapture(mode: TranscriptionMode): Promise<CaptureState> {
   if (!response.sessionId) {
     throw new Error(response.error ?? '无法开始标签页静音收录。');
   }
-
+  const next = await getCaptureState();
+  if (next.active || next.phase === 'capturing') {
+    await saveCaptureState({ ...next, linkState: 'transcribing' });
+  }
   return getCaptureState();
+}
+
+export async function showOverlayInCurrentTab(): Promise<boolean> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return false;
+  await chrome.scripting.executeScript({
+    files: ['content-tunnel.js'],
+    target: { tabId: tab.id }
+  });
+  return true;
 }
 
 async function retryTranscription(): Promise<CaptureState> {
@@ -215,7 +304,7 @@ async function ensureOffscreenDocument(): Promise<boolean> {
   await chrome.offscreen.createDocument({
     url: 'offscreen.html',
     reasons: [chrome.offscreen.Reason.USER_MEDIA],
-    justification: 'Capture an explicitly selected tab and run VOIVOX local speech recognition.'
+    justification: 'Capture an explicitly selected tab and run Voice Vac local speech recognition.'
   });
   return true;
 }
@@ -254,4 +343,18 @@ function getMediaStreamId(tabId: number): Promise<string> {
       resolve(streamId);
     });
   });
+}
+
+function isTunnelPoint(value: unknown): value is { screenX: number; screenY: number } {
+  return Boolean(value) && typeof value === 'object'
+    && Number.isFinite((value as { screenX?: unknown }).screenX)
+    && Number.isFinite((value as { screenY?: unknown }).screenY);
+}
+
+function isTunnelRect(value: unknown): value is { x: number; y: number; width: number; height: number } {
+  return Boolean(value) && typeof value === 'object'
+    && Number.isFinite((value as { x?: unknown }).x)
+    && Number.isFinite((value as { y?: unknown }).y)
+    && Number.isFinite((value as { width?: unknown }).width)
+    && Number.isFinite((value as { height?: unknown }).height);
 }

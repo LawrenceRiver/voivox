@@ -10,9 +10,15 @@ export class VoiceVacAsset {
   private readonly actions = new Map<string, THREE.AnimationAction>();
   private activeAction?: THREE.AnimationAction;
   private loaded = false;
+  private disposed = false;
 
   async load(scene: THREE.Scene, url: string): Promise<void> {
+    this.disposed = false;
     const gltf = await this.loader.loadAsync(url);
+    if (this.disposed) {
+      gltf.scene.traverse((object) => disposeObject(object));
+      return;
+    }
     this.group.clear();
     this.group.add(gltf.scene);
     // Blender is Z-up; the Voice Vac stage is Y-up.
@@ -52,6 +58,7 @@ export class VoiceVacAsset {
   }
 
   dispose(): void {
+    this.disposed = true;
     this.mixer?.stopAllAction();
     this.group.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return;
@@ -65,4 +72,11 @@ export class VoiceVacAsset {
     this.activeAction = undefined;
     this.loaded = false;
   }
+}
+
+function disposeObject(object: THREE.Object3D): void {
+  if (!(object instanceof THREE.Mesh)) return;
+  object.geometry.dispose();
+  if (Array.isArray(object.material)) object.material.forEach((item) => item.dispose());
+  else object.material.dispose();
 }

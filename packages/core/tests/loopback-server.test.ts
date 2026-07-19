@@ -9,7 +9,7 @@ import {
   type VoivoxLoopbackServer
 } from '../src/loopback-server.js';
 
-describe('VOIVOX loopback API', () => {
+describe('Voice Vac loopback API', () => {
   let server: VoivoxLoopbackServer | undefined;
 
   afterEach(async () => {
@@ -116,6 +116,35 @@ describe('VOIVOX loopback API', () => {
       rawSegments: [],
       derivedTranscripts: [{ provider: 'deepseek', text: '可以 静音 收录' }]
     });
+  });
+
+  it('coordinates a browser nozzle and desktop capsule through tunnel sessions', async () => {
+    server = await createVoivoxLoopbackServer({ token: 'desktop-only-token', extensionToken: 'chrome-bridge-token' });
+    const desktopHeaders = { authorization: 'Bearer desktop-only-token', 'content-type': 'application/json' };
+    const extensionHeaders = {
+      authorization: 'Bearer chrome-bridge-token',
+      'content-type': 'application/json',
+      origin: VOIVOX_EXTENSION_ORIGIN
+    };
+    const created = await fetch(`${server.baseUrl}/v1/extension/tunnel-sessions`, {
+      method: 'POST', headers: extensionHeaders,
+      body: JSON.stringify({ tabId: 9, title: 'Demo MV', state: 'detecting' })
+    });
+    expect(created.status).toBe(201);
+    const session = await created.json() as { id: string };
+    const updated = await fetch(`${server.baseUrl}/v1/tunnel-sessions/${session.id}`, {
+      method: 'PATCH', headers: desktopHeaders,
+      body: JSON.stringify({
+        state: 'ready',
+        targetRect: { x: 20, y: 30, width: 640, height: 360 },
+        pageEndpoint: { screenX: 340, screenY: 76 }
+      })
+    });
+    expect(await updated.json()).toMatchObject({ id: session.id, state: 'ready', tabId: 9 });
+    const listed = await fetch(`${server.baseUrl}/v1/tunnel-sessions`, { headers: desktopHeaders });
+    expect(await listed.json()).toMatchObject({ sessions: [{ id: session.id, state: 'ready' }] });
+    const deleted = await fetch(`${server.baseUrl}/v1/tunnel-sessions/${session.id}`, { method: 'DELETE', headers: desktopHeaders });
+    expect(deleted.status).toBe(204);
   });
 
   it('restricts the extension token to completed text imports and refuses Chrome audio routes', async () => {
@@ -570,7 +599,7 @@ describe('VOIVOX loopback API', () => {
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
-      error: 'VOIVOX JSON request body is too large.'
+      error: 'Voice Vac JSON request body is too large.'
     });
   });
 });

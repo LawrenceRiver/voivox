@@ -24,14 +24,28 @@ function addEye(group: THREE.Group, x: number): void {
   group.add(glint);
 }
 
+const FOLD_POSITIONS = [.12, .24, .39, .53, .68, .81, .93];
+
+function foldedHoseCurve(extension = 0, phase = 0): THREE.CatmullRomCurve3 {
+  const points: THREE.Vector3[] = [];
+  const length = 2.78 + extension * 1.16;
+  for (let index = 0; index <= 9; index += 1) {
+    const t = index / 9;
+    const fold = FOLD_POSITIONS.reduce((sum, position, foldIndex) => (
+      sum + Math.exp(-(((t - position) / .045) ** 2)) * Math.sin((t - position) * 46 + foldIndex * .8 + phase)
+    ), 0);
+    const bend = Math.sin(t * Math.PI) * .3;
+    points.push(new THREE.Vector3(
+      -3.25 + bend + fold * (.08 + extension * .018),
+      -.98 - length * t + Math.sin(t * Math.PI * 2 + phase) * .045 + fold * .05,
+      .1 + Math.cos(t * Math.PI) * .05
+    ));
+  }
+  return new THREE.CatmullRomCurve3(points, false, 'centripetal', .42);
+}
+
 function createCorrugatedHose(scene: THREE.Scene): { hose: THREE.Mesh; rings: THREE.Mesh[]; curve: THREE.CatmullRomCurve3 } {
-  const curve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(-3.25, -.98, .1),
-    new THREE.Vector3(-3.25, -1.55, .15),
-    new THREE.Vector3(-3.05, -2.45, .08),
-    new THREE.Vector3(-3.45, -3.25, .04),
-    new THREE.Vector3(-3.15, -3.75, .02)
-  ]);
+  const curve = foldedHoseCurve();
   const hose = new THREE.Mesh(
     new THREE.TubeGeometry(curve, 32, .19, 10, false),
     material(0x9aacb5, { roughness: .42, metalness: .05 })
@@ -94,14 +108,17 @@ function createScene(canvas: HTMLCanvasElement, width: number, height: number, a
   scene.add(shell);
 
   const portMaterial = new THREE.MeshPhysicalMaterial({ color: 0xe7f0f3, clearcoat: 1, opacity: .96, roughness: .07, transmission: .2, transparent: true });
+  const legacyPorts: THREE.Object3D[] = [];
   for (const x of [-3.4, 3.2]) {
     const port = new THREE.Mesh(new THREE.CylinderGeometry(1.03, 1.03, .18, 40), portMaterial);
     port.rotation.x = Math.PI / 2;
     port.position.set(x, .2, .38);
     scene.add(port);
+    legacyPorts.push(port);
     const ring = new THREE.Mesh(new THREE.TorusGeometry(1.02, .085, 10, 40), material(0xc6d5db, { roughness: .2, metalness: .3 }));
     ring.position.set(x, .2, .54);
     scene.add(ring);
+    legacyPorts.push(ring);
   }
 
   const hoseScene = createCorrugatedHose(scene);
@@ -126,12 +143,9 @@ function createScene(canvas: HTMLCanvasElement, width: number, height: number, a
   const legacyBody = new THREE.Group();
   legacyBody.add(shell);
   scene.add(legacyBody);
-  const legacyPortObjects = scene.children.filter((child) => child !== legacyBody && child !== hoseScene.hose && !hoseScene.rings.includes(child as THREE.Mesh) && child !== nozzle && child !== scene.children.at(-1));
-  legacyPortObjects.forEach((child) => {
-    if (child instanceof THREE.Mesh && child !== shell) {
-      scene.remove(child);
-      legacyBody.add(child);
-    }
+  legacyPorts.forEach((child) => {
+    scene.remove(child);
+    legacyBody.add(child);
   });
   let glbReady = false;
   void asset.load(scene, assetUrl).then(() => {
@@ -144,16 +158,11 @@ function createScene(canvas: HTMLCanvasElement, width: number, height: number, a
     glbReady = false;
   });
 
-  const redrawHose = (distance: number): void => {
-    const extension = Math.min(distance / 70, 2.3);
-    const points = [
-      new THREE.Vector3(-3.25, -.98, .1),
-      new THREE.Vector3(-3.25, -1.55, .15),
-      new THREE.Vector3(-3.05, -2.45 - extension * .22, .08),
-      new THREE.Vector3(-3.45 - extension * .15, -3.25 - extension * .72, .04),
-      new THREE.Vector3(-3.15 - extension * .25, -3.75 - extension, .02)
-    ];
-    const nextCurve = new THREE.CatmullRomCurve3(points);
+  let currentDistance = 0;
+  const redrawHose = (distance: number, phase = 0): void => {
+    currentDistance = distance;
+    const extension = Math.min(distance / 70, 1.45);
+    const nextCurve = foldedHoseCurve(extension, phase);
     hoseScene.hose.geometry.dispose();
     hoseScene.hose.geometry = new THREE.TubeGeometry(nextCurve, 32, .19, 10, false);
     hoseScene.rings.forEach((ring, index) => {
@@ -170,9 +179,11 @@ function createScene(canvas: HTMLCanvasElement, width: number, height: number, a
   const clock = new THREE.Clock();
   let frame = 0;
   const render = (): void => {
-    const elapsed = clock.getElapsedTime();
-    asset.update(clock.getDelta());
+    const delta = clock.getDelta();
+    const elapsed = clock.elapsedTime;
+    asset.update(delta);
     if (active) {
+      redrawHose(Math.max(currentDistance, 18), elapsed * 1.8);
       nozzle.rotation.z = -.05 + Math.sin(elapsed * 5) * .025;
       hoseScene.rings.forEach((ring, index) => {
         const pulse = .92 + Math.sin(elapsed * 6 - index * .55) * .08;
