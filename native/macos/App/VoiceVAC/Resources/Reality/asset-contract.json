@@ -1,0 +1,764 @@
+{
+  "assetSet": "native-game-prop-v2-metal-hose",
+  "authoringActions": [
+    "VAC_BUTTON_POSES",
+    "VAC_HOSE_POSES",
+    "VAC_NOZZLE_POSES"
+  ],
+  "axes": {
+    "authoringUp": "Z",
+    "forward": "-Z",
+    "up": "Y"
+  },
+  "buttonTravelMeters": 0.009,
+  "correctiveBlendShapes": [
+    {
+      "index": 0,
+      "inwardFraction": 1.0,
+      "maxDeltaMeters": 0.00145,
+      "name": "bendPositive",
+      "nonzeroVertexCount": 2169,
+      "rmsDeltaMeters": 0.0005518,
+      "supportFraction": 0.247433,
+      "supportSHA256": "4078ab42be0e750c69ef6b44b1a411159a9db639e40db583977c8cd9333cea1d"
+    },
+    {
+      "index": 1,
+      "inwardFraction": 1.0,
+      "maxDeltaMeters": 0.00145,
+      "name": "bendNegative",
+      "nonzeroVertexCount": 2169,
+      "rmsDeltaMeters": 0.0005518,
+      "supportFraction": 0.247433,
+      "supportSHA256": "571a98ae0ec4c05fd7c7231787b5396df92467de98555e091a2c9088c1615654"
+    }
+  ],
+  "exports": {
+    "VoiceVACDevice.usdz": {
+      "byteCount": 424547,
+      "sha256": "e8d118a93939687e6e22171f4b209559375767588b16ccb3a1634d245e35c988"
+    },
+    "VoiceVACHose.meshbin": {
+      "byteCount": 814808,
+      "sha256": "6187f90d0708f264064fdd8093e87f314fa193770da7dafa22904e358ac5ffb9"
+    },
+    "VoiceVACHose.usdz": {
+      "byteCount": 830433,
+      "sha256": "ef377d1ab1cf7eab0936e89271ac1409694dc86c292c35362fab3733c2966726"
+    }
+  },
+  "hoseRuntime": {
+    "binary": {
+      "bounds": {
+        "max": [
+          -0.1067539,
+          0.0686918,
+          0.0152797
+        ],
+        "min": [
+          -0.4620201,
+          -0.012704,
+          -0.3657073
+        ]
+      },
+      "byteCount": 814808,
+      "correctiveBlendShapes": [
+        {
+          "index": 0,
+          "inwardFraction": 1.0,
+          "maxDeltaMeters": 0.00145,
+          "name": "bendPositive",
+          "nonzeroVertexCount": 2169,
+          "rmsDeltaMeters": 0.0005518,
+          "supportFraction": 0.247433,
+          "supportSHA256": "4078ab42be0e750c69ef6b44b1a411159a9db639e40db583977c8cd9333cea1d"
+        },
+        {
+          "index": 1,
+          "inwardFraction": 1.0,
+          "maxDeltaMeters": 0.00145,
+          "name": "bendNegative",
+          "nonzeroVertexCount": 2169,
+          "rmsDeltaMeters": 0.0005518,
+          "supportFraction": 0.247433,
+          "supportSHA256": "571a98ae0ec4c05fd7c7231787b5396df92467de98555e091a2c9088c1615654"
+        }
+      ],
+      "endianness": "little",
+      "headerByteCount": 160,
+      "indexComponentType": "uint32",
+      "indexCount": 52584,
+      "jointCount": 64,
+      "jointIndexComponentType": "uint16",
+      "jointWeightComponentType": "float32",
+      "matrixComponentType": "float32",
+      "matrixLayout": "columnMajor4x4",
+      "maxInfluencesPerVertex": 2,
+      "normalComponentType": "float32",
+      "payloadSHA256": "3e915f4757e7f0e24a2cf0d4b2a9665a69d0158a075c563f892ffa91455a7bbe",
+      "positionComponentType": "float32",
+      "schema": "VoiceVACHoseMesh",
+      "sections": {
+        "bindMatricesOffset": 596200,
+        "correctiveDeltasOffset": 604392,
+        "indicesOffset": 385864,
+        "inverseBindMatricesOffset": 600296,
+        "jointIndicesOffset": 280672,
+        "jointWeightsOffset": 315736,
+        "materialOffset": 814776,
+        "normalsOffset": 105352,
+        "positionsOffset": 160,
+        "textureCoordinatesOffset": 210544
+      },
+      "sha256": "6187f90d0708f264064fdd8093e87f314fa193770da7dafa22904e358ac5ffb9",
+      "textureCoordinateComponentType": "float32",
+      "version": 1,
+      "vertexCount": 8766
+    },
+    "realityKitSkeletonTokensAreEntities": false,
+    "realityKitUSDZRole": "static-loadability-and-authoring-diagnostic-only",
+    "renderer": "metalSkinning",
+    "surface": "transparentMTKView"
+  },
+  "jointOrder": "root-to-tip",
+  "joints": [
+    "VAC_HOSE_JOINT_00",
+    "VAC_HOSE_JOINT_01",
+    "VAC_HOSE_JOINT_02",
+    "VAC_HOSE_JOINT_03",
+    "VAC_HOSE_JOINT_04",
+    "VAC_HOSE_JOINT_05",
+    "VAC_HOSE_JOINT_06",
+    "VAC_HOSE_JOINT_07",
+    "VAC_HOSE_JOINT_08",
+    "VAC_HOSE_JOINT_09",
+    "VAC_HOSE_JOINT_10",
+    "VAC_HOSE_JOINT_11",
+    "VAC_HOSE_JOINT_12",
+    "VAC_HOSE_JOINT_13",
+    "VAC_HOSE_JOINT_14",
+    "VAC_HOSE_JOINT_15",
+    "VAC_HOSE_JOINT_16",
+    "VAC_HOSE_JOINT_17",
+    "VAC_HOSE_JOINT_18",
+    "VAC_HOSE_JOINT_19",
+    "VAC_HOSE_JOINT_20",
+    "VAC_HOSE_JOINT_21",
+    "VAC_HOSE_JOINT_22",
+    "VAC_HOSE_JOINT_23",
+    "VAC_HOSE_JOINT_24",
+    "VAC_HOSE_JOINT_25",
+    "VAC_HOSE_JOINT_26",
+    "VAC_HOSE_JOINT_27",
+    "VAC_HOSE_JOINT_28",
+    "VAC_HOSE_JOINT_29",
+    "VAC_HOSE_JOINT_30",
+    "VAC_HOSE_JOINT_31",
+    "VAC_HOSE_JOINT_32",
+    "VAC_HOSE_JOINT_33",
+    "VAC_HOSE_JOINT_34",
+    "VAC_HOSE_JOINT_35",
+    "VAC_HOSE_JOINT_36",
+    "VAC_HOSE_JOINT_37",
+    "VAC_HOSE_JOINT_38",
+    "VAC_HOSE_JOINT_39",
+    "VAC_HOSE_JOINT_40",
+    "VAC_HOSE_JOINT_41",
+    "VAC_HOSE_JOINT_42",
+    "VAC_HOSE_JOINT_43",
+    "VAC_HOSE_JOINT_44",
+    "VAC_HOSE_JOINT_45",
+    "VAC_HOSE_JOINT_46",
+    "VAC_HOSE_JOINT_47",
+    "VAC_HOSE_JOINT_48",
+    "VAC_HOSE_JOINT_49",
+    "VAC_HOSE_JOINT_50",
+    "VAC_HOSE_JOINT_51",
+    "VAC_HOSE_JOINT_52",
+    "VAC_HOSE_JOINT_53",
+    "VAC_HOSE_JOINT_54",
+    "VAC_HOSE_JOINT_55",
+    "VAC_HOSE_JOINT_56",
+    "VAC_HOSE_JOINT_57",
+    "VAC_HOSE_JOINT_58",
+    "VAC_HOSE_JOINT_59",
+    "VAC_HOSE_JOINT_60",
+    "VAC_HOSE_JOINT_61",
+    "VAC_HOSE_JOINT_62",
+    "VAC_HOSE_JOINT_63"
+  ],
+  "localBounds": {
+    "VAC_BUTTON_BASE": {
+      "max": [
+        0.061331,
+        0.025,
+        0.061331
+      ],
+      "min": [
+        -0.061331,
+        -0.027,
+        -0.061331
+      ]
+    },
+    "VAC_BUTTON_CAP": {
+      "max": [
+        0.047066,
+        -0.024,
+        0.046674
+      ],
+      "min": [
+        -0.047066,
+        -0.065,
+        -0.046674
+      ]
+    },
+    "VAC_DEVICE_ROOT": {
+      "max": [
+        0.189331,
+        0.035,
+        0.089
+      ],
+      "min": [
+        -0.192171,
+        -0.1406,
+        -0.085
+      ]
+    },
+    "VAC_HOSE_ROOT": {
+      "max": [
+        -0.106754,
+        0.068692,
+        0.01528
+      ],
+      "min": [
+        -0.46202,
+        -0.012704,
+        -0.365707
+      ]
+    },
+    "VAC_HOSE_SKIN": {
+      "max": [
+        -0.106754,
+        0.068692,
+        0.01528
+      ],
+      "min": [
+        -0.46202,
+        -0.012704,
+        -0.365707
+      ]
+    },
+    "VAC_NOZZLE": {
+      "max": [
+        0.087,
+        0.01,
+        0.03584
+      ],
+      "min": [
+        -0.087,
+        -0.1036,
+        -0.03584
+      ]
+    },
+    "VAC_NOZZLE_TIP": {
+      "max": [
+        0.087,
+        -0.08944,
+        0.0265
+      ],
+      "min": [
+        -0.087,
+        -0.10156,
+        -0.0265
+      ]
+    },
+    "VAC_PORT": {
+      "max": [
+        0.060171,
+        0.029,
+        0.060171
+      ],
+      "min": [
+        -0.060171,
+        -0.029,
+        -0.060171
+      ]
+    }
+  },
+  "materialAssignments": {
+    "VAC_BUTTON_ACCENT_RING": [
+      "MAT_BRASS_ACCENT"
+    ],
+    "VAC_BUTTON_BASE": [
+      "MAT_CHARCOAL_METAL"
+    ],
+    "VAC_BUTTON_CAP": [
+      "MAT_BUTTON_RED"
+    ],
+    "VAC_BUTTON_READY_LIGHT": [
+      "MAT_PEARL_PLASTIC"
+    ],
+    "VAC_HOSE_SKIN": [
+      "MAT_PEARL_RIBBED"
+    ],
+    "VAC_NOZZLE_CHEEK_L": [
+      "MAT_BRASS_ACCENT"
+    ],
+    "VAC_NOZZLE_CHEEK_R": [
+      "MAT_BRASS_ACCENT"
+    ],
+    "VAC_NOZZLE_COLLAR": [
+      "MAT_CHARCOAL_METAL"
+    ],
+    "VAC_NOZZLE_GASKET": [
+      "MAT_CHARCOAL_RUBBER"
+    ],
+    "VAC_NOZZLE_MOUTH": [
+      "MAT_MOUTH_DARK"
+    ],
+    "VAC_NOZZLE_SHELL": [
+      "MAT_PEARL_PLASTIC"
+    ],
+    "VAC_NOZZLE_TIP": [
+      "MAT_PEARL_PLASTIC"
+    ],
+    "VAC_PORT": [
+      "MAT_PEARL_PLASTIC"
+    ],
+    "VAC_PORT_ACCENT": [
+      "MAT_BRASS_ACCENT"
+    ],
+    "VAC_PORT_SOCKET": [
+      "MAT_MOUTH_DARK"
+    ]
+  },
+  "materials": [
+    "MAT_PEARL_PLASTIC",
+    "MAT_PEARL_RIBBED",
+    "MAT_CHARCOAL_RUBBER",
+    "MAT_CHARCOAL_METAL",
+    "MAT_BUTTON_RED",
+    "MAT_BRASS_ACCENT",
+    "MAT_MOUTH_DARK"
+  ],
+  "meshStats": {
+    "meshCount": 15,
+    "perMesh": {
+      "VAC_BUTTON_ACCENT_RING": {
+        "polygons": 240,
+        "triangles": 480,
+        "vertices": 320
+      },
+      "VAC_BUTTON_BASE": {
+        "polygons": 1040,
+        "triangles": 1920,
+        "vertices": 962
+      },
+      "VAC_BUTTON_CAP": {
+        "polygons": 1496,
+        "triangles": 2816,
+        "vertices": 1410
+      },
+      "VAC_BUTTON_READY_LIGHT": {
+        "polygons": 240,
+        "triangles": 480,
+        "vertices": 320
+      },
+      "VAC_HOSE_SKIN": {
+        "polygons": 8792,
+        "triangles": 17528,
+        "vertices": 8766
+      },
+      "VAC_NOZZLE_CHEEK_L": {
+        "polygons": 72,
+        "triangles": 96,
+        "vertices": 50
+      },
+      "VAC_NOZZLE_CHEEK_R": {
+        "polygons": 72,
+        "triangles": 96,
+        "vertices": 50
+      },
+      "VAC_NOZZLE_COLLAR": {
+        "polygons": 192,
+        "triangles": 384,
+        "vertices": 256
+      },
+      "VAC_NOZZLE_GASKET": {
+        "polygons": 224,
+        "triangles": 448,
+        "vertices": 224
+      },
+      "VAC_NOZZLE_MOUTH": {
+        "polygons": 56,
+        "triangles": 56,
+        "vertices": 57
+      },
+      "VAC_NOZZLE_SHELL": {
+        "polygons": 504,
+        "triangles": 952,
+        "vertices": 505
+      },
+      "VAC_NOZZLE_TIP": {
+        "polygons": 896,
+        "triangles": 1792,
+        "vertices": 896
+      },
+      "VAC_PORT": {
+        "polygons": 504,
+        "triangles": 1008,
+        "vertices": 576
+      },
+      "VAC_PORT_ACCENT": {
+        "polygons": 216,
+        "triangles": 432,
+        "vertices": 288
+      },
+      "VAC_PORT_SOCKET": {
+        "polygons": 448,
+        "triangles": 832,
+        "vertices": 449
+      }
+    },
+    "polygons": 14992,
+    "triangles": 29320,
+    "vertices": 15129
+  },
+  "nominalDockTransform": {
+    "rotationQuaternion": [
+      0.707107,
+      0.0,
+      0.707107,
+      0.0
+    ],
+    "scale": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "translation": [
+      -0.132,
+      -0.037,
+      0.002
+    ]
+  },
+  "nozzlePivot": {
+    "rotationQuaternion": [
+      0.707107,
+      0.0,
+      0.707107,
+      0.0
+    ],
+    "scale": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "translation": [
+      -0.132,
+      -0.037,
+      0.002
+    ]
+  },
+  "poseFrames": {
+    "attachmentCompression": 36,
+    "buttonDown": 20,
+    "buttonPaused": 30,
+    "buttonReady": 10,
+    "buttonUp": 1,
+    "hoseRest": 1,
+    "hoseSuctionPulse": 24,
+    "nozzleHorizontalDeploy": 24,
+    "nozzleLiftRotate": 10,
+    "nozzleVerticalDock": 1
+  },
+  "product": "Voice VAC",
+  "reproducibility": {
+    "mode": "semantic-contract-v1",
+    "sceneSemanticSHA256": "1de85d8cbfa0b2eb5f1d01fd73700bc73c8dc5b090780670899a5f5998832648",
+    "statement": "Normalized scene semantics are reproducible; Blender and USD container bytes are not promised identical."
+  },
+  "runtimeNodes": [
+    "VAC_DEVICE_ROOT",
+    "VAC_PORT",
+    "VAC_NOZZLE",
+    "VAC_NOZZLE_TIP",
+    "VAC_BUTTON_BASE",
+    "VAC_BUTTON_CAP",
+    "VAC_HOSE_ROOT",
+    "VAC_HOSE_SKIN"
+  ],
+  "runtimePoseDelivery": {
+    "mode": "namedTransforms",
+    "namedPoses": {
+      "buttonDown": {
+        "action": "VAC_BUTTON_POSES",
+        "frame": 20,
+        "node": "VAC_BUTTON_CAP",
+        "transform": {
+          "rotationQuaternion": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.03,
+            0.94,
+            1.03
+          ],
+          "translation": [
+            0.128,
+            0.015,
+            0.002
+          ]
+        }
+      },
+      "buttonPaused": {
+        "action": "VAC_BUTTON_POSES",
+        "frame": 30,
+        "node": "VAC_BUTTON_CAP",
+        "transform": {
+          "rotationQuaternion": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.015,
+            0.98,
+            1.015
+          ],
+          "translation": [
+            0.128,
+            0.01032,
+            0.002
+          ]
+        }
+      },
+      "buttonReady": {
+        "action": "VAC_BUTTON_POSES",
+        "frame": 10,
+        "node": "VAC_BUTTON_CAP",
+        "transform": {
+          "rotationQuaternion": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.006,
+            0.995,
+            1.006
+          ],
+          "translation": [
+            0.128,
+            0.0055,
+            0.002
+          ]
+        }
+      },
+      "buttonUp": {
+        "action": "VAC_BUTTON_POSES",
+        "frame": 1,
+        "node": "VAC_BUTTON_CAP",
+        "transform": {
+          "rotationQuaternion": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.128,
+            0.006,
+            0.002
+          ]
+        }
+      },
+      "nozzleAttachmentCompression": {
+        "action": "VAC_NOZZLE_POSES",
+        "frame": 36,
+        "node": "VAC_NOZZLE",
+        "transform": {
+          "rotationQuaternion": [
+            0.996956,
+            0.034814,
+            -0.002434,
+            -0.069714
+          ],
+          "scale": [
+            1.0,
+            0.92,
+            1.04
+          ],
+          "translation": [
+            -0.437,
+            0.020801,
+            -0.358483
+          ]
+        }
+      },
+      "nozzleDeployed": {
+        "action": "VAC_NOZZLE_POSES",
+        "frame": 24,
+        "node": "VAC_NOZZLE",
+        "transform": {
+          "rotationQuaternion": [
+            0.997564,
+            0.0,
+            0.0,
+            -0.069756
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            -0.437,
+            0.014801,
+            -0.358483
+          ]
+        }
+      },
+      "nozzleDocked": {
+        "action": "VAC_NOZZLE_POSES",
+        "frame": 1,
+        "node": "VAC_NOZZLE",
+        "transform": {
+          "rotationQuaternion": [
+            0.707107,
+            0.0,
+            0.707107,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            -0.132,
+            -0.037,
+            0.002
+          ]
+        }
+      },
+      "nozzleLiftRotate": {
+        "action": "VAC_NOZZLE_POSES",
+        "frame": 10,
+        "node": "VAC_NOZZLE",
+        "transform": {
+          "rotationQuaternion": [
+            0.981627,
+            0.0,
+            0.190809,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            -0.132,
+            -0.047,
+            0.02
+          ]
+        }
+      }
+    },
+    "source": "evaluated Blender actions copied into stable runtime transforms",
+    "usdzAnimationTimeSamples": false
+  },
+  "schemaVersion": 2,
+  "skinWeights": {
+    "groupVertexCounts": {
+      "VAC_HOSE_JOINT_00": 141,
+      "VAC_HOSE_JOINT_01": 252,
+      "VAC_HOSE_JOINT_02": 280,
+      "VAC_HOSE_JOINT_03": 280,
+      "VAC_HOSE_JOINT_04": 280,
+      "VAC_HOSE_JOINT_05": 280,
+      "VAC_HOSE_JOINT_06": 280,
+      "VAC_HOSE_JOINT_07": 280,
+      "VAC_HOSE_JOINT_08": 280,
+      "VAC_HOSE_JOINT_09": 280,
+      "VAC_HOSE_JOINT_10": 280,
+      "VAC_HOSE_JOINT_11": 280,
+      "VAC_HOSE_JOINT_12": 280,
+      "VAC_HOSE_JOINT_13": 280,
+      "VAC_HOSE_JOINT_14": 280,
+      "VAC_HOSE_JOINT_15": 280,
+      "VAC_HOSE_JOINT_16": 280,
+      "VAC_HOSE_JOINT_17": 280,
+      "VAC_HOSE_JOINT_18": 280,
+      "VAC_HOSE_JOINT_19": 280,
+      "VAC_HOSE_JOINT_20": 252,
+      "VAC_HOSE_JOINT_21": 252,
+      "VAC_HOSE_JOINT_22": 252,
+      "VAC_HOSE_JOINT_23": 280,
+      "VAC_HOSE_JOINT_24": 280,
+      "VAC_HOSE_JOINT_25": 280,
+      "VAC_HOSE_JOINT_26": 280,
+      "VAC_HOSE_JOINT_27": 280,
+      "VAC_HOSE_JOINT_28": 280,
+      "VAC_HOSE_JOINT_29": 280,
+      "VAC_HOSE_JOINT_30": 280,
+      "VAC_HOSE_JOINT_31": 280,
+      "VAC_HOSE_JOINT_32": 280,
+      "VAC_HOSE_JOINT_33": 280,
+      "VAC_HOSE_JOINT_34": 280,
+      "VAC_HOSE_JOINT_35": 280,
+      "VAC_HOSE_JOINT_36": 280,
+      "VAC_HOSE_JOINT_37": 280,
+      "VAC_HOSE_JOINT_38": 280,
+      "VAC_HOSE_JOINT_39": 280,
+      "VAC_HOSE_JOINT_40": 280,
+      "VAC_HOSE_JOINT_41": 252,
+      "VAC_HOSE_JOINT_42": 252,
+      "VAC_HOSE_JOINT_43": 252,
+      "VAC_HOSE_JOINT_44": 280,
+      "VAC_HOSE_JOINT_45": 280,
+      "VAC_HOSE_JOINT_46": 280,
+      "VAC_HOSE_JOINT_47": 280,
+      "VAC_HOSE_JOINT_48": 280,
+      "VAC_HOSE_JOINT_49": 280,
+      "VAC_HOSE_JOINT_50": 280,
+      "VAC_HOSE_JOINT_51": 280,
+      "VAC_HOSE_JOINT_52": 280,
+      "VAC_HOSE_JOINT_53": 280,
+      "VAC_HOSE_JOINT_54": 280,
+      "VAC_HOSE_JOINT_55": 280,
+      "VAC_HOSE_JOINT_56": 280,
+      "VAC_HOSE_JOINT_57": 280,
+      "VAC_HOSE_JOINT_58": 280,
+      "VAC_HOSE_JOINT_59": 280,
+      "VAC_HOSE_JOINT_60": 280,
+      "VAC_HOSE_JOINT_61": 280,
+      "VAC_HOSE_JOINT_62": 252,
+      "VAC_HOSE_JOINT_63": 141
+    },
+    "maxInfluencesPerVertex": 2,
+    "maxWeightSum": 1.0,
+    "minWeightSum": 1.0,
+    "vertexCount": 8766,
+    "weightedVertexCount": 8766
+  },
+  "sourceHashes": {
+    "build_voice_vac.py": "14987a9e1566c1a736b73f61fefd634324d434f22c3706d5ad1da6e370d19ace",
+    "voice-vac-machine.blend": "83690f64deca629cb11149735474a4e7d4fa93cb08665939206d43a6f0de6395"
+  },
+  "units": {
+    "linear": "meter",
+    "metersPerUnit": 1.0
+  }
+}

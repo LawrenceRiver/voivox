@@ -2,3 +2,4 @@
 .venv*/
 blender-mcp-server/
 *.blend1
+__pycache__/
