@@ -1,0 +1,65 @@
+name: VoiceVAC
+
+options:
+  bundleIdPrefix: io.voivox
+  deploymentTarget:
+    macOS: "26.0"
+  minimumXcodeGenVersion: "2.45.4"
+
+configs:
+  Debug: debug
+  Release: release
+
+packages:
+  VoiceVACCore:
+    path: ..
+
+targets:
+  VoiceVAC:
+    type: application
+    platform: macOS
+    deploymentTarget: "26.0"
+    productName: Voice VAC
+    sources:
+      - path: VoiceVAC
+    configFiles:
+      Debug: Config/Debug.xcconfig
+      Release: Config/Release.xcconfig
+    dependencies:
+      - package: VoiceVACCore
+        product: VoiceVACCore
+    settings:
+      base:
+        ARCHS: arm64
+        CODE_SIGNING_ALLOWED: NO
+        EXECUTABLE_NAME: VoiceVAC
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Config/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: io.voivox.app
+        PRODUCT_NAME: Voice VAC
+
+  VoiceVACAppTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: VoiceVACAppTests
+    dependencies:
+      - target: VoiceVAC
+    settings:
+      base:
+        ARCHS: arm64
+        BUNDLE_LOADER: $(TEST_HOST)
+        CODE_SIGNING_ALLOWED: NO
+        PRODUCT_BUNDLE_IDENTIFIER: io.voivox.app.tests
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Voice VAC.app/Contents/MacOS/VoiceVAC
+
+schemes:
+  VoiceVAC:
+    build:
+      targets:
+        VoiceVAC: all
+        VoiceVACAppTests: [test]
+    test:
+      targets:
+        - VoiceVACAppTests
