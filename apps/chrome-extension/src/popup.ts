@@ -213,11 +213,15 @@ function setModeText(button: HTMLButtonElement, label: string, size: string): vo
 
 function statusKey(phase: CaptureState['phase']): MessageKey {
   const keys: Record<CaptureState['phase'], MessageKey> = {
+    armed: 'status.ready',
+    'awaiting-user-play': 'status.ready',
     capturing: 'status.capturing',
     complete: 'status.complete',
+    connecting: 'status.capturing',
     downloading: 'status.downloading',
     error: 'status.error',
     idle: 'status.ready',
+    paused: 'status.ready',
     transcribing: 'status.transcribing'
   };
   return keys[phase];

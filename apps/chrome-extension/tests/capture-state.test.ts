@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { normalizeCaptureState } from '../src/bridge.js';
+import { normalizeCaptureState, saveCaptureState } from '../src/bridge.js';
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe('normalizeCaptureState', () => {
   it('returns a quality-mode idle state for a first installation', () => {
@@ -36,6 +38,55 @@ describe('normalizeCaptureState', () => {
       route: 'browser-local',
       tabTitle: 'MV',
       transcript: '歌词转写'
+    });
+  });
+
+  it.each([
+    'armed',
+    'connecting',
+    'awaiting-user-play',
+    'capturing',
+    'paused',
+    'downloading',
+    'transcribing',
+    'complete',
+    'error'
+  ] as const)('preserves the %s target-session capture phase', (phase) => {
+    expect(normalizeCaptureState({ active: phase === 'capturing', mode: 'quality', phase }).phase)
+      .toBe(phase);
+  });
+
+  it('never persists a tab identity in compatibility capture state', () => {
+    expect(normalizeCaptureState({
+      active: false,
+      mode: 'quality',
+      phase: 'armed',
+      tabId: 41,
+      documentId: 'doc-41'
+    })).not.toMatchObject({ tabId: 41, documentId: 'doc-41' });
+  });
+
+  it('strips runtime-injected tab identity at the storage write boundary', async () => {
+    const set = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('chrome', { storage: { local: { set } } });
+
+    await saveCaptureState({
+      active: false,
+      mode: 'quality',
+      phase: 'armed',
+      tabId: 41,
+      documentId: 'doc-41'
+    } as never);
+
+    expect(set).toHaveBeenCalledWith({
+      voivoxCaptureState: { active: false, mode: 'quality', phase: 'armed' }
+    });
+  });
+
+  it('normalizes an explicitly invalid phase to idle even when legacy active is true', () => {
+    expect(normalizeCaptureState({ active: true, mode: 'quality', phase: 'alien' })).toMatchObject({
+      active: true,
+      phase: 'idle'
     });
   });
 

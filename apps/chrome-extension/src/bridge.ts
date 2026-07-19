@@ -15,7 +15,7 @@ export type CaptureState = {
   active: boolean;
   canRetry?: boolean;
   mode: TranscriptionMode;
-  phase: 'idle' | 'capturing' | 'downloading' | 'transcribing' | 'complete' | 'error';
+  phase: CapturePhase;
   progress?: number;
   route?: Exclude<TranscriptionRoute, 'unavailable'>;
   sessionId?: string;
@@ -30,6 +30,18 @@ export type CaptureState = {
   appEndpoint?: TunnelPoint;
   tunnelSessionId?: string;
 };
+
+export type CapturePhase =
+  | 'idle'
+  | 'armed'
+  | 'connecting'
+  | 'awaiting-user-play'
+  | 'capturing'
+  | 'paused'
+  | 'downloading'
+  | 'transcribing'
+  | 'complete'
+  | 'error';
 
 const bridgeKey = 'voivoxBridge';
 const stateKey = 'voivoxCaptureState';
@@ -53,7 +65,7 @@ export async function getCaptureState(): Promise<CaptureState> {
 }
 
 export function saveCaptureState(state: CaptureState): Promise<void> {
-  return chrome.storage.local.set({ [stateKey]: state });
+  return chrome.storage.local.set({ [stateKey]: normalizeCaptureState(state) });
 }
 
 export function normalizeCaptureState(value: unknown): CaptureState {
@@ -62,7 +74,11 @@ export function normalizeCaptureState(value: unknown): CaptureState {
   const state: CaptureState = {
     active,
     mode: record.mode === 'fast' || record.mode === 'quality' ? record.mode : 'quality',
-    phase: isCapturePhase(record.phase) ? record.phase : active ? 'capturing' : 'idle'
+    phase: isCapturePhase(record.phase)
+      ? record.phase
+      : record.phase === undefined && active
+        ? 'capturing'
+        : 'idle'
   };
 
   if (record.canRetry === true) state.canRetry = true;
@@ -92,7 +108,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isCapturePhase(value: unknown): value is CaptureState['phase'] {
   return value === 'idle'
+    || value === 'armed'
+    || value === 'connecting'
+    || value === 'awaiting-user-play'
     || value === 'capturing'
+    || value === 'paused'
     || value === 'downloading'
     || value === 'transcribing'
     || value === 'complete'

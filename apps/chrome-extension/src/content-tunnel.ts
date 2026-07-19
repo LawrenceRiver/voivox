@@ -241,7 +241,11 @@ function machineMarkup(): string {
 function statusLabel(phase: CaptureState['phase']): string {
   const labels: Record<CaptureState['phase'], string> = {
     idle: '检测视频',
+    armed: '已武装',
+    connecting: '正在连接',
+    'awaiting-user-play': '等待播放',
     capturing: '正在连接',
+    paused: '已暂停',
     downloading: '正在准备',
     transcribing: '正在转录',
     complete: '已完成',
