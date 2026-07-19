@@ -1,4 +1,6 @@
 import os
+import hashlib
+import json
 import struct
 import sys
 import tempfile
@@ -51,6 +53,15 @@ class QwenRuntimeTests(unittest.TestCase):
         model_dir = Path(parent) / "Qwen3-ASR-0.6B"
         model_dir.mkdir()
         (model_dir / "config.json").write_text("{}", encoding="utf-8")
+        config_sha256 = hashlib.sha256((model_dir / "config.json").read_bytes()).hexdigest()
+        (model_dir / "model-manifest.json").write_text(json.dumps({
+            "schemaVersion": 1,
+            "repoId": "Qwen/Qwen3-ASR-0.6B",
+            "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+            "modelPath": str(model_dir.resolve()),
+            "configSha256": config_sha256,
+            "installedAt": "2026-07-19T00:00:00Z",
+        }), encoding="utf-8")
         return model_dir
 
     def test_requires_an_absolute_local_model_with_config(self):
@@ -71,6 +82,33 @@ class QwenRuntimeTests(unittest.TestCase):
                 )
         self.assertEqual(missing.exception.code, "ASR_MODEL_MISSING")
 
+        with tempfile.TemporaryDirectory() as temporary:
+            model_dir = Path(temporary) / "model"
+            model_dir.mkdir()
+            (model_dir / "config.json").write_text("{}", encoding="utf-8")
+            with self.assertRaises(RuntimeFailure) as missing_manifest:
+                QwenRuntime.from_local_path(
+                    str(model_dir),
+                    model_class=FakeModelClass,
+                    torch_module=self.fake_torch(mps_available=False),
+                )
+        self.assertEqual(missing_manifest.exception.code, "ASR_MODEL_MISSING")
+
+    def test_rejects_a_manifest_for_a_different_snapshot_or_path(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            model_dir = self.make_model_dir(temporary)
+            manifest_path = model_dir / "model-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["revision"] = "wrong"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaises(RuntimeFailure) as mismatch:
+                QwenRuntime.from_local_path(
+                    str(model_dir),
+                    model_class=FakeModelClass,
+                    torch_module=self.fake_torch(mps_available=False),
+                )
+        self.assertEqual(mismatch.exception.code, "ASR_MODEL_MISSING")
+
     def test_sets_offline_flags_before_loading_and_uses_cpu_float32(self):
         with tempfile.TemporaryDirectory() as temporary:
             model_dir = self.make_model_dir(temporary)
@@ -84,6 +122,11 @@ class QwenRuntimeTests(unittest.TestCase):
         self.assertEqual(os.environ["TRANSFORMERS_OFFLINE"], "1")
         self.assertEqual(runtime.device, "cpu")
         self.assertEqual(runtime.model_id, "Qwen/Qwen3-ASR-0.6B")
+        self.assertEqual(runtime.model_revision, "5eb144179a02acc5e5ba31e748d22b0cf3e303b0")
+        self.assertEqual(runtime.runtime_package, "qwen-asr")
+        self.assertEqual(runtime.runtime_version, "0.0.6")
+        self.assertRegex(runtime.python_version, r"^3\.\d+\.\d+$")
+        self.assertFalse(runtime.speech_api_used)
         _, kwargs = FakeModelClass.calls[0]
         self.assertEqual(
             kwargs,

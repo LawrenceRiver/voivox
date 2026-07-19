@@ -1,23 +1,19 @@
 #!/usr/bin/env node
 
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { cpus, freemem, homedir, platform, totalmem } from 'node:os';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
-
-import { env, pipeline } from '@huggingface/transformers';
+import { fileURLToPath } from 'node:url';
 
 import {
-  FAST_MODEL,
-  QUALITY_MODEL,
-  assertFastModelPinMatches,
-  assertQualityModelPinMatches,
+  QWEN_MODEL,
   buildEvidence,
-  decodeFloat32Le,
   formatEvidenceMarkdown,
+  isValidReadyFrame,
   parseVerificationArguments
 } from './verify-local-asr-lib.mjs';
 
@@ -27,217 +23,236 @@ const repositoryRoot = resolve(scriptDirectory, '..');
 async function main() {
   const verificationStartedAt = performance.now();
   const options = parseVerificationArguments(process.argv.slice(2));
-  const input = resolve(options.input);
-  const audioOutput = resolve(options.audioOutput);
-  const jsonOutput = resolve(options.jsonOutput);
-  const markdownOutput = resolve(options.markdownOutput);
-  const extensionModelSource = await readFile(
-    resolve(repositoryRoot, 'apps/chrome-extension/src/local-transcription.ts'),
-    'utf8'
+  const paths = Object.fromEntries(
+    ['input', 'audioOutput', 'jsonOutput', 'markdownOutput', 'modelPath']
+      .map((key) => [key, resolve(options[key].replace(/^~(?=\/)/u, homedir()) )])
   );
-  const model = options.mode === 'quality' ? QUALITY_MODEL : FAST_MODEL;
-  if (options.mode === 'quality') {
-    assertQualityModelPinMatches(extensionModelSource);
-  } else {
-    assertFastModelPinMatches(extensionModelSource);
-  }
-
+  await verifyModelManifest(paths.modelPath);
   await Promise.all([
-    mkdir(dirname(audioOutput), { recursive: true }),
-    mkdir(dirname(jsonOutput), { recursive: true }),
-    mkdir(dirname(markdownOutput), { recursive: true })
+    mkdir(dirname(paths.audioOutput), { recursive: true }),
+    mkdir(dirname(paths.jsonOutput), { recursive: true }),
+    mkdir(dirname(paths.markdownOutput), { recursive: true })
   ]);
 
-  console.error(
-    `[Voice Vac] Extracting ${options.durationSeconds}s from ${options.startSeconds}s as 16 kHz mono PCM WAV...`
-  );
-  await runFfmpeg([
-    '-y',
-    '-hide_banner',
-    '-loglevel', 'error',
-    '-ss', String(options.startSeconds),
-    '-i', input,
-    '-t', String(options.durationSeconds),
-    '-vn',
-    '-ac', '1',
-    '-ar', '16000',
-    '-c:a', 'pcm_s16le',
-    audioOutput
+  console.error(`[Voice VAC] Extracting ${options.durationSeconds}s as 16 kHz mono PCM...`);
+  await runProcess('ffmpeg', [
+    '-y', '-hide_banner', '-loglevel', 'error',
+    '-ss', String(options.startSeconds), '-i', paths.input,
+    '-t', String(options.durationSeconds), '-vn', '-ac', '1', '-ar', '16000',
+    '-c:a', 'pcm_s16le', paths.audioOutput
   ]);
+  const pcm = await captureProcess('ffmpeg', [
+    '-hide_banner', '-loglevel', 'error', '-i', paths.audioOutput,
+    '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-f', 's16le', 'pipe:1'
+  ], Math.ceil(options.durationSeconds * 32_000) + 65_536);
+  if (!pcm.length || pcm.length % 2) throw new Error('FFmpeg extracted invalid PCM16 audio.');
+  const actualDurationSeconds = pcm.length / 32_000;
 
-  const rawAudio = await captureFfmpeg([
-    '-hide_banner',
-    '-loglevel', 'error',
-    '-i', audioOutput,
-    '-vn',
-    '-ac', '1',
-    '-ar', '16000',
-    '-c:a', 'pcm_f32le',
-    '-f', 'f32le',
-    'pipe:1'
-  ], Math.ceil(options.durationSeconds * 16_000 * 4) + 1_048_576);
-  const audio = decodeFloat32Le(rawAudio);
-  const actualDurationSeconds = audio.length / 16_000;
-  if (audio.length === 0) {
-    throw new Error('FFmpeg extracted an empty audio segment.');
-  }
-
-  env.allowLocalModels = false;
-  env.allowRemoteModels = true;
-  env.remoteHost = 'https://huggingface.co/';
-  const modelCacheState = await detectModelCacheState(model);
-
-  let lastProgressBucket = -1;
-  console.error(
-    `[Voice Vac] Loading ${model.id}@${model.revision} (${model.dtype}) for local inference...`
-  );
-  const modelLoadStartedAt = performance.now();
-  const transcriber = await pipeline('automatic-speech-recognition', model.id, {
-    device: 'cpu',
-    dtype: model.dtype,
-    progress_callback: (event) => {
-      const progress = Number(event.progress);
-      if (!Number.isFinite(progress)) return;
-      const bucket = Math.floor(Math.min(100, Math.max(0, progress)) / 10);
-      if (bucket > lastProgressBucket) {
-        lastProgressBucket = bucket;
-        console.error(`[Voice Vac] Model artifacts: ${bucket * 10}%`);
-      }
-    },
-    revision: model.revision
+  const worker = await runWorker({
+    modelPath: paths.modelPath,
+    pcm,
+    pythonCommand: options.pythonCommand,
+    workerPath: resolve(repositoryRoot, 'native/asr/voivox_asr_worker.py')
   });
-  const modelLoadSeconds = (performance.now() - modelLoadStartedAt) / 1000;
-
-  let output;
-  const startedAt = performance.now();
-  try {
-    console.error(`[Voice Vac] Running ${options.mode} local ASR on ${actualDurationSeconds.toFixed(3)}s audio...`);
-    output = await transcriber(audio, {
-      chunk_length_s: 30,
-      return_timestamps: false,
-      stride_length_s: 5,
-      task: 'transcribe'
-    });
-  } finally {
-    await transcriber.dispose();
-  }
-  const elapsedSeconds = (performance.now() - startedAt) / 1000;
-  const outputText = (Array.isArray(output)
-    ? output.map((item) => item.text?.trim()).filter(Boolean).join(' ')
-    : output?.text ?? '').trim();
-
   const [inputInfo, audioInfo, inputSha256, audioSha256] = await Promise.all([
-    stat(input),
-    stat(audioOutput),
-    hashFile(input),
-    hashFile(audioOutput)
+    stat(paths.input), stat(paths.audioOutput), hashFile(paths.input), hashFile(paths.audioOutput)
   ]);
-  const totalVerificationSeconds = (performance.now() - verificationStartedAt) / 1000;
   const evidence = buildEvidence({
     audioSha256,
     audioSizeBytes: audioInfo.size,
+    device: worker.device,
     durationSeconds: Number(actualDurationSeconds.toFixed(3)),
-    elapsedSeconds,
+    hardware: {
+      architecture: process.arch,
+      cpu: cpus()[0]?.model ?? 'unknown',
+      freeMemoryBytes: freemem(),
+      operatingSystem: platform(),
+      totalMemoryBytes: totalmem()
+    },
+    inferenceSeconds: worker.inferenceSeconds,
     inputSha256,
     inputSizeBytes: inputInfo.size,
-    model,
-    modelCacheState,
-    modelLoadSeconds,
-    mode: options.mode,
-    outputText,
+    language: worker.language,
+    modelLoadSeconds: worker.modelLoadSeconds,
+    modelPath: paths.modelPath,
+    outputText: worker.text,
+    runtime: {
+      modelRevision: worker.modelRevision,
+      pythonVersion: worker.pythonVersion,
+      runtimePackage: worker.runtimePackage,
+      runtimeVersion: worker.runtimeVersion,
+      speechApiUsed: worker.speechApiUsed
+    },
     sourceTitle: options.sourceTitle,
     sourceUrl: options.sourceUrl,
     startSeconds: options.startSeconds,
-    totalVerificationSeconds
+    totalVerificationSeconds: (performance.now() - verificationStartedAt) / 1000
   });
-
   await Promise.all([
-    writeFile(jsonOutput, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8'),
-    writeFile(markdownOutput, formatEvidenceMarkdown(evidence), 'utf8')
+    writeFile(paths.jsonOutput, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8'),
+    writeFile(paths.markdownOutput, formatEvidenceMarkdown(evidence), 'utf8')
   ]);
-
   console.log(JSON.stringify({
-    audioOutput,
-    jsonOutput,
-    markdownOutput,
-    mode: options.mode,
-    model,
-    modelLoadSeconds: evidence.execution.modelLoadSeconds,
-    segment: evidence.segment,
-    text: outputText,
-    totalVerificationSeconds: evidence.execution.totalVerificationSeconds,
-    transcriptionSeconds: evidence.execution.transcriptionSeconds
+    device: worker.device,
+    language: worker.language,
+    model: QWEN_MODEL,
+    text: worker.text,
+    timings: evidence.execution
   }, null, 2));
 }
 
-async function detectModelCacheState(model) {
-  const cacheRoot = resolve(env.cacheDir, model.id, model.revision);
-  const requiredFiles = [
-    'config.json',
-    'tokenizer.json',
-    'onnx/encoder_model_quantized.onnx',
-    'onnx/decoder_model_merged_quantized.onnx'
-  ];
-  try {
-    await Promise.all(requiredFiles.map((file) => access(resolve(cacheRoot, file))));
-    return 'warm';
-  } catch {
-    return 'cold';
+async function verifyModelManifest(modelPath) {
+  const [manifestText, configText] = await Promise.all([
+    readFile(resolve(modelPath, 'model-manifest.json'), 'utf8'),
+    readFile(resolve(modelPath, 'config.json'), 'utf8')
+  ]);
+  const manifest = JSON.parse(manifestText);
+  const configSha256 = createHash('sha256').update(configText, 'utf8').digest('hex');
+  if (manifest.schemaVersion !== 1 || manifest.repoId !== QWEN_MODEL.id
+      || manifest.revision !== QWEN_MODEL.revision || manifest.modelPath !== modelPath
+      || manifest.configSha256 !== configSha256) {
+    throw new Error('The local Qwen model manifest does not match the pinned Voice VAC snapshot.');
   }
 }
 
-async function runFfmpeg(arguments_) {
-  await new Promise((resolvePromise, rejectPromise) => {
-    const process = spawn('ffmpeg', arguments_, { stdio: ['ignore', 'ignore', 'pipe'] });
-    const errors = [];
-    process.stderr.on('data', (chunk) => errors.push(chunk));
-    process.on('error', rejectPromise);
-    process.on('close', (code) => {
-      if (code === 0) {
-        resolvePromise();
+async function runWorker({ modelPath, pcm, pythonCommand, workerPath }) {
+  const startedAt = performance.now();
+  const child = spawn(pythonCommand, [workerPath], {
+    env: {
+      ...process.env,
+      HF_HUB_OFFLINE: '1',
+      TRANSFORMERS_OFFLINE: '1',
+      VOICE_VAC_QWEN_MODEL_PATH: modelPath
+    },
+    stdio: ['pipe', 'pipe', 'pipe']
+  });
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  let stdoutBuffer = '';
+  let stderr = '';
+  let settled = false;
+  let readyAt;
+  let readyDevice;
+  let readyMetadata;
+  let acceptedAt;
+  let completedResult;
+  const requestId = 'verify_1';
+
+  return await new Promise((resolvePromise, rejectPromise) => {
+    const timeout = setTimeout(() => finish(new Error('Local Qwen verification timed out.')), 20 * 60_000);
+    timeout.unref();
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (error) {
+        child.kill('SIGKILL');
+        rejectPromise(error);
       } else {
-        rejectPromise(new Error(`FFmpeg exited with code ${code}: ${Buffer.concat(errors).toString('utf8')}`));
+        resolvePromise(result);
+      }
+    };
+    child.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-8_000); });
+    child.once('error', finish);
+    child.once('close', (code) => {
+      if (settled) return;
+      if (code === 0 && completedResult) finish(undefined, completedResult);
+      else finish(new Error(stderr || `Local Qwen worker exited with code ${code}.`));
+    });
+    child.stdout.on('data', (chunk) => {
+      stdoutBuffer += chunk;
+      const lines = stdoutBuffer.split('\n');
+      stdoutBuffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line) continue;
+        let frame;
+        try { frame = JSON.parse(line); } catch { finish(new Error('Local Qwen worker emitted invalid NDJSON.')); return; }
+        if (frame.type === 'status') continue;
+        if (frame.type === 'ready') {
+          if (readyAt || !isValidReadyFrame(frame)) {
+            finish(new Error('Local Qwen worker emitted an invalid ready frame.')); return;
+          }
+          readyAt = performance.now();
+          readyDevice = frame.device;
+          readyMetadata = frame;
+          child.stdin.write(`${JSON.stringify({
+            id: requestId,
+            pcm: pcm.toString('base64'),
+            sampleRate: 16000,
+            channels: 1,
+            language: null
+          })}\n`);
+        } else if (frame.type === 'accepted') {
+          if (!readyAt || frame.id !== requestId || acceptedAt) {
+            finish(new Error('Local Qwen worker accepted out of order.')); return;
+          }
+          acceptedAt = performance.now();
+        } else if (frame.type === 'result') {
+          if (!acceptedAt || frame.id !== requestId || typeof frame.text !== 'string') {
+            finish(new Error('Local Qwen worker returned an invalid result.')); return;
+          }
+          const completedAt = performance.now();
+          completedResult = {
+            device: readyDevice,
+            inferenceSeconds: (completedAt - acceptedAt) / 1000,
+            language: frame.language ?? null,
+            modelRevision: readyMetadata.model_revision,
+            modelLoadSeconds: (readyAt - startedAt) / 1000,
+            pythonVersion: readyMetadata.python_version,
+            runtimePackage: readyMetadata.runtime_package,
+            runtimeVersion: readyMetadata.runtime_version,
+            speechApiUsed: readyMetadata.speech_api_used,
+            text: frame.text
+          };
+          child.stdin.end();
+        } else if (frame.type === 'fatal' || frame.type === 'error') {
+          finish(new Error(`${frame.code}: ${frame.error}`));
+        } else {
+          finish(new Error(`Local Qwen worker emitted unknown frame: ${frame.type}`));
+        }
       }
     });
   });
 }
 
-async function captureFfmpeg(arguments_, maximumBytes) {
+async function runProcess(command, arguments_) {
+  await captureProcess(command, arguments_, 0);
+}
+
+async function captureProcess(command, arguments_, maximumBytes) {
   return await new Promise((resolvePromise, rejectPromise) => {
-    const process = spawn('ffmpeg', arguments_, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, arguments_, { stdio: ['ignore', 'pipe', 'pipe'] });
     const output = [];
     const errors = [];
     let outputBytes = 0;
-    process.stdout.on('data', (chunk) => {
+    let rejected = false;
+    child.stdout.on('data', (chunk) => {
       outputBytes += chunk.length;
-      if (outputBytes > maximumBytes) {
-        process.kill('SIGKILL');
-        rejectPromise(new Error(`Decoded PCM exceeded the ${maximumBytes}-byte safety limit.`));
+      if (maximumBytes >= 0 && outputBytes > maximumBytes) {
+        rejected = true;
+        child.kill('SIGKILL');
+        rejectPromise(new Error(`Process output exceeded ${maximumBytes} bytes.`));
         return;
       }
       output.push(chunk);
     });
-    process.stderr.on('data', (chunk) => errors.push(chunk));
-    process.on('error', rejectPromise);
-    process.on('close', (code) => {
-      if (code === 0) {
-        resolvePromise(Buffer.concat(output));
-      } else if (outputBytes <= maximumBytes) {
-        rejectPromise(new Error(`FFmpeg exited with code ${code}: ${Buffer.concat(errors).toString('utf8')}`));
-      }
+    child.stderr.on('data', (chunk) => errors.push(chunk));
+    child.once('error', rejectPromise);
+    child.once('close', (code) => {
+      if (rejected) return;
+      if (code === 0) resolvePromise(Buffer.concat(output));
+      else rejectPromise(new Error(`${command} exited with code ${code}: ${Buffer.concat(errors).toString('utf8')}`));
     });
   });
 }
 
 async function hashFile(path) {
   const hash = createHash('sha256');
-  for await (const chunk of createReadStream(path)) {
-    hash.update(chunk);
-  }
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
   return hash.digest('hex');
 }
 
 main().catch((error) => {
-  console.error(`[Voice Vac] ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+  console.error(error instanceof Error ? error.stack : error);
   process.exitCode = 1;
 });

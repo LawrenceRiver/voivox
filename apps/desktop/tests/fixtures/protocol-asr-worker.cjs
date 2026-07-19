@@ -11,7 +11,17 @@ function emit(frame) {
 }
 
 function ready() {
-  emit({ type: 'ready', model_id: 'fixture/Qwen3-ASR-0.6B', device: 'cpu' });
+  emit({
+    type: 'ready',
+    model_id: 'Qwen/Qwen3-ASR-0.6B',
+    model_revision: '5eb144179a02acc5e5ba31e748d22b0cf3e303b0',
+    device: 'cpu',
+    python_version: '3.12.9',
+    runtime_package: 'qwen-asr',
+    runtime_version: '0.0.6',
+    speech_api_used: false,
+    offline: true
+  });
 }
 
 emit({ type: 'status', status: 'booting' });

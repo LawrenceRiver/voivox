@@ -22,7 +22,7 @@ import {
   type ExtensionConnectionPublisher
 } from '../src/main/native-messaging.js';
 import { PythonQwenAsrEngine } from '../src/main/python-qwen-asr-engine.js';
-import { resolvePythonCommand } from '../src/main/python-runtime.js';
+import { resolvePythonCommand, resolveQwenModelPath } from '../src/main/python-runtime.js';
 import { enforceSingleInstance } from '../src/main/single-instance.js';
 import { readWavDuration } from '../src/main/wav-duration.js';
 import { resolveBundledResource, resolveElectronEntryPoints } from './resource-paths.js';
@@ -46,8 +46,9 @@ async function bootstrap(): Promise<void> {
   const chromeBridgeToken = await getOrCreateToken(join(dataPath, 'chrome-bridge-token'));
   let nativeMessagingReady = false;
   const pythonCommand = resolvePythonCommand(dataPath, process.env.VOIVOX_PYTHON);
-  const localAsrProbe = startLocalAsrCapabilityProbe(pythonCommand);
+  const modelPath = resolveQwenModelPath(dataPath, process.env.VOICE_VAC_QWEN_MODEL_PATH);
   asrEngine = new PythonQwenAsrEngine({
+    modelPath,
     pythonCommand,
     workerPath: resolveBundledResource('voivox_asr_worker.py', {
       isPackaged: app.isPackaged,
@@ -55,6 +56,7 @@ async function bootstrap(): Promise<void> {
       resourcesPath: process.resourcesPath
     })
   });
+  const localAsrProbe = startLocalAsrCapabilityProbe(asrEngine);
   const asrPipeline = new BufferedAsrPipeline(runtime.getService(), asrEngine, {
     onError: (error) => {
       console.error('Voice Vac local ASR error:', error.message);

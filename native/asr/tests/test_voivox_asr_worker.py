@@ -18,7 +18,12 @@ from voivox_asr_worker import run_worker  # noqa: E402
 
 class FakeRuntime:
     model_id = "Qwen/Qwen3-ASR-0.6B"
+    model_revision = "5eb144179a02acc5e5ba31e748d22b0cf3e303b0"
     device = "mps"
+    python_version = "3.12.9"
+    runtime_package = "qwen-asr"
+    runtime_version = "0.0.6"
+    speech_api_used = False
 
     def __init__(self):
         self.calls = []
@@ -58,7 +63,17 @@ class WorkerProtocolTests(unittest.TestCase):
             [
                 {"type": "status", "status": "booting"},
                 {"type": "status", "status": "model_loading"},
-                {"type": "ready", "model_id": "Qwen/Qwen3-ASR-0.6B", "device": "mps"},
+                {
+                    "type": "ready",
+                    "model_id": "Qwen/Qwen3-ASR-0.6B",
+                    "model_revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+                    "device": "mps",
+                    "python_version": "3.12.9",
+                    "runtime_package": "qwen-asr",
+                    "runtime_version": "0.0.6",
+                    "speech_api_used": False,
+                    "offline": True,
+                },
                 {"type": "accepted", "id": "asr_1"},
                 {"type": "result", "id": "asr_1", "text": "hello from Voice VAC", "language": "English"},
             ],
@@ -127,6 +142,7 @@ class WorkerProtocolTests(unittest.TestCase):
     def test_real_process_uses_default_local_only_factory_and_ndjson_transport(self):
         fake_qwen = '''
 import os
+__version__ = "0.0.6"
 from types import SimpleNamespace
 
 assert os.environ["HF_HUB_OFFLINE"] == "1"
@@ -178,6 +194,15 @@ def frombuffer(_pcm, dtype):
             model_path = temporary_path / "model"
             model_path.mkdir()
             (model_path / "config.json").write_text("{}", encoding="utf-8")
+            config_sha256 = __import__("hashlib").sha256((model_path / "config.json").read_bytes()).hexdigest()
+            (model_path / "model-manifest.json").write_text(json.dumps({
+                "schemaVersion": 1,
+                "repoId": "Qwen/Qwen3-ASR-0.6B",
+                "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+                "modelPath": str(model_path.resolve()),
+                "configSha256": config_sha256,
+                "installedAt": "2026-07-19T00:00:00Z",
+            }), encoding="utf-8")
             env = dict(os.environ)
             env["VOICE_VAC_QWEN_MODEL_PATH"] = str(model_path)
             env["PYTHONPATH"] = os.pathsep.join([str(temporary_path), str(ASR_ROOT)])

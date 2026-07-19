@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """Offline Qwen3-ASR runtime used by the persistent Voice VAC worker."""
 
+import datetime
+import hashlib
+import importlib.metadata
+import json
 import os
+import platform
 from pathlib import Path
 
 
@@ -12,6 +17,9 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 
 MODEL_ID = "Qwen/Qwen3-ASR-0.6B"
+MODEL_REVISION = "5eb144179a02acc5e5ba31e748d22b0cf3e303b0"
+RUNTIME_PACKAGE = "qwen-asr"
+RUNTIME_VERSION = "0.0.6"
 
 
 class RuntimeFailure(Exception):
@@ -25,6 +33,7 @@ class RuntimeFailure(Exception):
 
 def _load_dependencies():
     try:
+        import qwen_asr
         import numpy
         import torch
         from qwen_asr import Qwen3ASRModel
@@ -34,18 +43,32 @@ def _load_dependencies():
             "The pinned Voice VAC Qwen runtime is not installed.",
             error,
         ) from error
-    return Qwen3ASRModel, torch, numpy
+    try:
+        runtime_version = importlib.metadata.version(RUNTIME_PACKAGE)
+    except importlib.metadata.PackageNotFoundError:
+        runtime_version = getattr(qwen_asr, "__version__", None)
+    if runtime_version != RUNTIME_VERSION:
+        raise RuntimeFailure(
+            "ASR_RUNTIME_MISSING",
+            "The pinned Voice VAC Qwen runtime version is not installed.",
+        )
+    return Qwen3ASRModel, torch, numpy, runtime_version
 
 
 class QwenRuntime:
     """Thin adapter around the official qwen-asr Transformers backend."""
 
-    def __init__(self, model, device, numpy_module, model_path):
+    def __init__(self, model, device, numpy_module, model_path, runtime_version):
         self._model = model
         self._numpy = numpy_module
         self.device = device
         self.model_id = MODEL_ID
+        self.model_revision = MODEL_REVISION
         self.model_path = model_path
+        self.python_version = platform.python_version()
+        self.runtime_package = RUNTIME_PACKAGE
+        self.runtime_version = runtime_version
+        self.speech_api_used = False
 
     @classmethod
     def from_local_path(
@@ -58,7 +81,13 @@ class QwenRuntime:
         numpy_module=None
     ):
         path = Path(model_path)
-        if not path.is_absolute() or not path.is_dir() or not (path / "config.json").is_file():
+        if not path.is_absolute():
+            raise RuntimeFailure(
+                "ASR_MODEL_MISSING",
+                "The pinned local Qwen3-ASR-0.6B model is not installed.",
+            )
+        path = path.resolve()
+        if not _is_verified_model_install(path):
             raise RuntimeFailure(
                 "ASR_MODEL_MISSING",
                 "The pinned local Qwen3-ASR-0.6B model is not installed.",
@@ -67,7 +96,7 @@ class QwenRuntime:
         if model_class is None or torch_module is None:
             loader = dependency_loader or _load_dependencies
             try:
-                loaded_model_class, loaded_torch, loaded_numpy = loader()
+                loaded_model_class, loaded_torch, loaded_numpy, loaded_runtime_version = loader()
             except RuntimeFailure:
                 raise
             except (ImportError, ModuleNotFoundError) as error:
@@ -79,6 +108,7 @@ class QwenRuntime:
             model_class = model_class or loaded_model_class
             torch_module = torch_module or loaded_torch
             numpy_module = numpy_module or loaded_numpy
+            runtime_version = loaded_runtime_version
         elif numpy_module is None:
             try:
                 import numpy as numpy_module
@@ -88,6 +118,9 @@ class QwenRuntime:
                     "The pinned Voice VAC Qwen runtime is not installed.",
                     error,
                 ) from error
+            runtime_version = RUNTIME_VERSION
+        else:
+            runtime_version = RUNTIME_VERSION
 
         attempts = []
         try:
@@ -108,7 +141,7 @@ class QwenRuntime:
                     max_inference_batch_size=1,
                     max_new_tokens=256,
                 )
-                return cls(model, device, numpy_module, str(path))
+                return cls(model, device, numpy_module, str(path), runtime_version)
             except Exception as error:  # the official stack exposes many loader errors
                 last_error = error
 
@@ -153,3 +186,29 @@ class QwenRuntime:
                 "Voice VAC local ASR inference failed.",
                 error,
             ) from error
+
+
+def _is_verified_model_install(path):
+    config_path = path / "config.json"
+    manifest_path = path / "model-manifest.json"
+    if not path.is_dir() or not config_path.is_file() or not manifest_path.is_file():
+        return False
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        installed_at = manifest.get("installedAt")
+        if not isinstance(config, dict) or not isinstance(manifest, dict):
+            return False
+        if not isinstance(installed_at, str):
+            return False
+        datetime.datetime.fromisoformat(installed_at.replace("Z", "+00:00"))
+        return (
+            manifest.get("schemaVersion") == 1
+            and manifest.get("repoId") == MODEL_ID
+            and manifest.get("revision") == MODEL_REVISION
+            and manifest.get("modelPath") == str(path)
+            and isinstance(manifest.get("configSha256"), str)
+            and manifest.get("configSha256") == hashlib.sha256(config_path.read_bytes()).hexdigest()
+        )
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False

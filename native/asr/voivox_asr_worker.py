@@ -131,7 +131,13 @@ def run_worker(*, runtime_factory=None, stdin=None, stdout=None, stderr=None):
     emitter.emit({
         "type": "ready",
         "model_id": runtime.model_id,
+        "model_revision": runtime.model_revision,
         "device": runtime.device,
+        "python_version": runtime.python_version,
+        "runtime_package": runtime.runtime_package,
+        "runtime_version": runtime.runtime_version,
+        "speech_api_used": runtime.speech_api_used,
+        "offline": True,
     })
 
     for line in stdin:

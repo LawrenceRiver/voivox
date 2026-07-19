@@ -58,4 +58,12 @@ describe('local ASR capability probe', () => {
     expect(source).not.toContain('find_spec');
     expect(source).not.toContain('child_process');
   });
+
+  it('wires the validated external model path into the exact probed engine', async () => {
+    const source = await readFile(new URL('../electron/main.ts', import.meta.url), 'utf8');
+    expect(source).toContain('resolveQwenModelPath');
+    expect(source).toMatch(/modelPath[,\s]/u);
+    expect(source).toContain('startLocalAsrCapabilityProbe(asrEngine)');
+    expect(source).not.toContain('startLocalAsrCapabilityProbe(pythonCommand)');
+  });
 });

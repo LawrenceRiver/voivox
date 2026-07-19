@@ -7,6 +7,7 @@ import {
 } from '@voivox/core';
 
 import type { LocalAsrEngine } from './asr-pipeline.js';
+import { QWEN_MODEL_INSTALL } from './python-runtime.js';
 
 export type PythonQwenAsrStatus =
   | 'idle'
@@ -324,12 +325,21 @@ export class PythonQwenAsrEngine implements LocalAsrEngine {
       }
       case 'ready': {
         if (
-          !hasExactKeys(frame, ['type', 'model_id', 'device'])
+          !hasExactKeys(frame, [
+            'type', 'model_id', 'model_revision', 'device', 'python_version',
+            'runtime_package', 'runtime_version', 'speech_api_used', 'offline'
+          ])
           || this.status === 'ready'
-          || typeof frame.model_id !== 'string'
-          || !frame.model_id
+          || frame.model_id !== QWEN_MODEL_INSTALL.repoId
+          || frame.model_revision !== QWEN_MODEL_INSTALL.revision
           || typeof frame.device !== 'string'
           || !frame.device
+          || typeof frame.python_version !== 'string'
+          || !/^3\.12\.\d+$/u.test(frame.python_version)
+          || frame.runtime_package !== 'qwen-asr'
+          || frame.runtime_version !== '0.0.6'
+          || frame.speech_api_used !== false
+          || frame.offline !== true
         ) {
           this.failWorker(child, new VoiceVacError('ASR_INFERENCE_FAILED'));
           return;

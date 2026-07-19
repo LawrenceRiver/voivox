@@ -1,13 +1,8 @@
-export const FAST_MODEL = Object.freeze({
-  dtype: 'q8',
-  id: 'onnx-community/whisper-tiny',
-  revision: 'ff4177021cc41f7db950912b73ea4fdf7d01d8e7'
-});
-
-export const QUALITY_MODEL = Object.freeze({
-  dtype: 'q8',
-  id: 'onnx-community/whisper-base',
-  revision: '1846881b6b3a3024392c1eea3ad983695bc23925'
+export const QWEN_MODEL = Object.freeze({
+  id: 'Qwen/Qwen3-ASR-0.6B',
+  revision: '5eb144179a02acc5e5ba31e748d22b0cf3e303b0',
+  runtimePackage: 'qwen-asr',
+  runtimeVersion: '0.0.6'
 });
 
 const CLI_OPTION_NAMES = new Set([
@@ -16,51 +11,40 @@ const CLI_OPTION_NAMES = new Set([
   '--input',
   '--json-output',
   '--markdown-output',
-  '--mode',
+  '--model-path',
+  '--python-command',
   '--source-title',
   '--source-url',
   '--start'
 ]);
 
 export function parseVerificationArguments(argv) {
+  if (argv.length % 2 !== 0) throw new Error(`Option ${argv.at(-1)} requires a value.`);
   const values = new Map();
   for (let index = 0; index < argv.length; index += 2) {
     const name = argv[index];
     const value = argv[index + 1];
-    if (!CLI_OPTION_NAMES.has(name)) {
-      throw new Error(`Unknown option: ${name ?? '[missing]'}`);
-    }
-    if (value === undefined || value.startsWith('--')) {
-      throw new Error(`Option ${name} requires a value.`);
-    }
+    if (!CLI_OPTION_NAMES.has(name)) throw new Error(`Unknown option: ${name ?? '[missing]'}`);
+    if (value === undefined || value.startsWith('--')) throw new Error(`Option ${name} requires a value.`);
+    if (values.has(name)) throw new Error(`Duplicate option: ${name}`);
     values.set(name, value);
   }
 
   const durationSeconds = Number(values.get('--duration') ?? 30);
-  const mode = values.get('--mode') ?? 'fast';
   const startSeconds = Number(values.get('--start') ?? 0);
-  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
-    throw new Error('--duration must be a positive number.');
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || durationSeconds > 600) {
+    throw new Error('--duration must be a positive number no greater than 600.');
   }
   if (!Number.isFinite(startSeconds) || startSeconds < 0) {
     throw new Error('--start must be a non-negative number.');
   }
-  if (mode !== 'fast' && mode !== 'quality') {
-    throw new Error('--mode must be fast or quality.');
-  }
 
   const required = [
-    '--input',
-    '--audio-output',
-    '--json-output',
-    '--markdown-output',
-    '--source-title',
-    '--source-url'
+    '--input', '--audio-output', '--json-output', '--markdown-output',
+    '--model-path', '--python-command', '--source-title', '--source-url'
   ];
   for (const name of required) {
-    if (!values.get(name)) {
-      throw new Error(`Missing required option: ${name}`);
-    }
+    if (!values.get(name)) throw new Error(`Missing required option: ${name}`);
   }
 
   return {
@@ -69,72 +53,92 @@ export function parseVerificationArguments(argv) {
     input: values.get('--input'),
     jsonOutput: values.get('--json-output'),
     markdownOutput: values.get('--markdown-output'),
-    mode,
+    modelPath: values.get('--model-path'),
+    pythonCommand: values.get('--python-command'),
     sourceTitle: values.get('--source-title'),
     sourceUrl: values.get('--source-url'),
     startSeconds
   };
 }
 
-export function assertFastModelPinMatches(extensionSource) {
-  const fastBlock = extensionSource.match(/fast\s*:\s*\{([\s\S]*?)\}\s*,\s*quality\s*:/)?.[1];
-  const expectedValues = [FAST_MODEL.id, FAST_MODEL.revision, FAST_MODEL.dtype];
-  if (!fastBlock || expectedValues.some((value) => !fastBlock.includes(`'${value}'`))) {
-    throw new Error('Verification model pin does not match the extension fast-mode source.');
+export function parseWorkerProtocol(lines, requestId) {
+  let ready;
+  let accepted = false;
+  let result;
+  for (const line of lines) {
+    let frame;
+    try {
+      frame = JSON.parse(line);
+    } catch {
+      throw new Error('Voice VAC worker emitted invalid NDJSON.');
+    }
+    if (!frame || typeof frame !== 'object' || typeof frame.type !== 'string') {
+      throw new Error('Voice VAC worker emitted an invalid protocol frame.');
+    }
+    if (frame.type === 'status') {
+      if (frame.status !== 'booting' && frame.status !== 'model_loading') {
+        throw new Error('Voice VAC worker emitted an invalid status frame.');
+      }
+    } else if (frame.type === 'ready') {
+      if (ready || !isValidReadyFrame(frame)) {
+        throw new Error('Voice VAC worker emitted an invalid ready frame.');
+      }
+      ready = frame;
+    } else if (frame.type === 'accepted') {
+      if (!ready || accepted || frame.id !== requestId) throw new Error('Voice VAC worker accepted out of order.');
+      accepted = true;
+    } else if (frame.type === 'result') {
+      if (!accepted || result || frame.id !== requestId || typeof frame.text !== 'string') {
+        throw new Error('Voice VAC worker returned an invalid result frame.');
+      }
+      if (frame.language !== null && typeof frame.language !== 'string') {
+        throw new Error('Voice VAC worker returned an invalid language.');
+      }
+      result = frame;
+    } else if (frame.type === 'fatal' || frame.type === 'error') {
+      throw new Error(`${frame.code ?? 'ASR_INFERENCE_FAILED'}: ${frame.error ?? 'Local ASR failed.'}`);
+    } else {
+      throw new Error(`Voice VAC worker emitted unknown frame type: ${frame.type}`);
+    }
   }
-}
-
-export function assertQualityModelPinMatches(extensionSource) {
-  const qualityBlock = extensionSource.match(/quality\s*:\s*\{([\s\S]*?)\}/)?.[1];
-  const expectedValues = [QUALITY_MODEL.id, QUALITY_MODEL.revision, QUALITY_MODEL.dtype];
-  if (!qualityBlock || expectedValues.some((value) => !qualityBlock.includes(`'${value}'`))) {
-    throw new Error('Verification model pin does not match the extension quality-mode source.');
-  }
-}
-
-export function decodeFloat32Le(bytes) {
-  if (bytes.byteLength % 4 !== 0) {
-    throw new Error('Float32 PCM must contain a multiple of four bytes.');
-  }
-
-  const audio = new Float32Array(bytes.byteLength / 4);
-  for (let index = 0; index < audio.length; index += 1) {
-    audio[index] = bytes.readFloatLE(index * 4);
-  }
-  return audio;
+  if (!ready || !accepted || !result) throw new Error('Voice VAC worker protocol did not complete.');
+  return {
+    device: ready.device,
+    language: result.language,
+    modelRevision: ready.model_revision,
+    pythonVersion: ready.python_version,
+    runtimePackage: ready.runtime_package,
+    runtimeVersion: ready.runtime_version,
+    speechApiUsed: ready.speech_api_used,
+    text: result.text
+  };
 }
 
 export function buildEvidence({
   audioSha256,
   audioSizeBytes,
+  device,
   durationSeconds,
-  elapsedSeconds,
+  inferenceSeconds,
   inputSha256,
   inputSizeBytes,
-  model,
-  modelCacheState,
+  language,
   modelLoadSeconds,
-  mode,
+  modelPath,
+  runtime,
   outputText,
   recordedAt = new Date().toISOString(),
   sourceTitle,
   sourceUrl,
   startSeconds,
-  totalVerificationSeconds
+  totalVerificationSeconds,
+  hardware
 }) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     recordedAt,
-    source: {
-      title: sourceTitle,
-      url: sourceUrl,
-      inputSha256,
-      inputSizeBytes
-    },
-    segment: {
-      startSeconds,
-      durationSeconds
-    },
+    source: { title: sourceTitle, url: sourceUrl, inputSha256, inputSizeBytes },
+    segment: { startSeconds, durationSeconds },
     audio: {
       channels: 1,
       codec: 'pcm_s16le',
@@ -143,56 +147,73 @@ export function buildEvidence({
       sha256: audioSha256,
       sizeBytes: audioSizeBytes
     },
-    model: {
-      ...model,
-      library: '@huggingface/transformers',
-      libraryVersion: '3.8.1',
-      mode
-    },
+    model: { ...QWEN_MODEL, revision: runtime.modelRevision, path: modelPath },
+    hardware,
     execution: {
+      device,
       inferenceLocation: 'local-machine',
-      modelCacheStateBeforeRun: modelCacheState,
-      modelLoadSeconds: Number(modelLoadSeconds.toFixed(3)),
-      runtime: 'Transformers.js + ONNX Runtime CPU verification harness',
-      speechApiUsed: false,
-      totalVerificationSeconds: Number(totalVerificationSeconds.toFixed(3)),
-      transcriptionSeconds: Number(elapsedSeconds.toFixed(3))
+      modelCacheStateBeforeRun: 'verified-pinned-snapshot',
+      modelLoadSeconds: rounded(modelLoadSeconds),
+      inferenceSeconds: rounded(inferenceSeconds),
+      pythonVersion: runtime.pythonVersion,
+      runtimePackage: runtime.runtimePackage,
+      runtimePackageVersion: runtime.runtimeVersion,
+      runtime: `Python ${runtime.pythonVersion} + ${runtime.runtimePackage} ${runtime.runtimeVersion} Transformers backend`,
+      speechApiUsed: runtime.speechApiUsed,
+      totalVerificationSeconds: rounded(totalVerificationSeconds)
     },
-    result: {
-      text: outputText
-    },
+    result: { language, text: outputText },
     limitations: [
       'This is one real-path smoke test, not a word-error-rate benchmark.',
-      'The selected source is a music mix; vocals and instrumental backing can reduce speech-recognition accuracy.',
-      `The Node verification harness uses the same pinned q8 model as Voice Vac ${mode} mode, but it does not replace an in-browser extension UI test.`
+      'Model installation and download time are excluded from modelLoadSeconds.',
+      'Website availability and media acquisition are evaluated separately.'
     ]
   };
 }
 
 export function formatEvidenceMarkdown(evidence) {
-  return `# Voice Vac local-ASR smoke-test evidence
+  return `# Voice VAC local Qwen ASR evidence
 
 - Source: [${evidence.source.title}](${evidence.source.url})
 - Segment: ${evidence.segment.startSeconds}s–${evidence.segment.startSeconds + evidence.segment.durationSeconds}s (${evidence.segment.durationSeconds}s)
 - Audio: 16 kHz mono PCM WAV
-- Mode: ${evidence.model.mode}
-- Model: \`${evidence.model.id}\` at \`${evidence.model.revision}\` (${evidence.model.dtype})
+- Model: \`${evidence.model.id}\` at \`${evidence.model.revision}\`
 - Runtime: ${evidence.execution.runtime}
-- Model cache before run: ${evidence.execution.modelCacheStateBeforeRun}
-- Model setup: ${evidence.execution.modelLoadSeconds}s
-- Transcription phase: ${evidence.execution.transcriptionSeconds}s (model setup excluded)
-- Total verification command: ${evidence.execution.totalVerificationSeconds}s
-- Privacy: **No speech API was used.** The audio was decoded and inferred on the local machine.
+- Device: \`${evidence.execution.device}\`
+- Model load: ${evidence.execution.modelLoadSeconds}s
+- Inference: ${evidence.execution.inferenceSeconds}s
+- Total verification: ${evidence.execution.totalVerificationSeconds}s
+- Privacy: **No speech API was used.** Audio inference ran on the local machine with the pinned external snapshot.
 
 ## Raw model output
 
 > ${evidence.result.text || '[empty output]'}
 
-## Scope and limitations
+Language: \`${evidence.result.language ?? 'auto'}\`
 
-This is a reproducible end-to-end smoke test, not an accuracy score. The source is a music mix, so backing instrumentation and sung vocals may reduce recognition quality. The harness verifies local inference with the same pinned q8 model used by Voice Vac ${evidence.model.mode} mode; it does not substitute for the separate Chrome-extension UI test.
+## Reproducibility
 
 - Input SHA-256: \`${evidence.source.inputSha256}\`
 - Extracted-audio SHA-256: \`${evidence.audio.sha256}\`
+- Model path: \`${evidence.model.path}\`
 `;
+}
+
+function rounded(value) {
+  return Number(Number(value).toFixed(3));
+}
+
+export function isValidReadyFrame(frame) {
+  return frame
+    && typeof frame === 'object'
+    && frame.model_id === QWEN_MODEL.id
+    && frame.model_revision === QWEN_MODEL.revision
+    && typeof frame.device === 'string'
+    && frame.device.length > 0
+    && typeof frame.python_version === 'string'
+    && /^3\.12\.\d+$/u.test(frame.python_version)
+    && frame.runtime_package === QWEN_MODEL.runtimePackage
+    && frame.runtime_version === QWEN_MODEL.runtimeVersion
+    && frame.speech_api_used === false
+    && frame.offline === true;
 }
