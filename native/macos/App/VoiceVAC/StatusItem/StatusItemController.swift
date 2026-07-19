@@ -1,7 +1,10 @@
 import AppKit
 
 @MainActor
-final class StatusItemController {
+protocol StatusItemControlling: AnyObject {}
+
+@MainActor
+final class StatusItemController: StatusItemControlling {
     private let statusItem: NSStatusItem
 
     init(statusBar: NSStatusBar = .system) {

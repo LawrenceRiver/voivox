@@ -2,21 +2,19 @@ import AppKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var environment: AppEnvironment?
+    private let environmentFactory: any AppEnvironmentFactory
+    private(set) var environment: AppEnvironment?
+
+    init(environmentFactory: any AppEnvironmentFactory = LiveAppEnvironmentFactory()) {
+        self.environmentFactory = environmentFactory
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        let store = VoiceVACStore()
-        let statusItemController = StatusItemController()
-        let windowCoordinator = LifecycleWindowCoordinator()
-        let environment = AppEnvironment(
-            store: store,
-            statusItemController: statusItemController,
-            windowCoordinator: windowCoordinator
-        )
-
+        let environment = environmentFactory.makeEnvironment()
         self.environment = environment
-        environment.windowCoordinator.start(with: environment.store)
+        environment.start()
     }
 }

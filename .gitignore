@@ -11,6 +11,8 @@ release/
 
 # Native build state
 native/macos/.build/
+native/macos/.derived/
+native/macos/App/VoiceVAC.xcodeproj/
 
 # Local credentials, runtime data, and operating-system files
 .env
