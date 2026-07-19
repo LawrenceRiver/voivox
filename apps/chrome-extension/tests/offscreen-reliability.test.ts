@@ -241,7 +241,7 @@ describe('offscreen capture reliability', () => {
 
     expect(cancelled.state).toMatchObject({
       canRetry: true,
-      errorCode: 'transcription-cancelled',
+      errorCode: 'TRANSCRIPTION_CANCELLED',
       phase: 'error',
       route: 'browser-local'
     });

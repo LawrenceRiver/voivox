@@ -90,18 +90,28 @@ describe('normalizeCaptureState', () => {
     });
   });
 
-  it('preserves only known localized transcription error codes', () => {
+  it('normalizes legacy transcription codes and preserves only known capture errors', () => {
     expect(normalizeCaptureState({
       active: false,
       canRetry: true,
-      errorCode: 'transcription-timeout',
+      errorCode: 'TRANSCRIPTION_TIMEOUT',
       mode: 'quality',
       phase: 'error',
       route: 'browser-local'
     })).toMatchObject({
       canRetry: true,
-      errorCode: 'transcription-timeout',
+      errorCode: 'TRANSCRIPTION_TIMEOUT',
       phase: 'error'
+    });
+
+    expect(normalizeCaptureState({
+      active: false,
+      errorCode: 'USER_PLAY_REQUIRED',
+      mode: 'quality',
+      phase: 'awaiting-user-play'
+    })).toMatchObject({
+      errorCode: 'USER_PLAY_REQUIRED',
+      phase: 'awaiting-user-play'
     });
 
     expect(normalizeCaptureState({

@@ -291,8 +291,8 @@ async function runBrowserTranscription(): Promise<void> {
     const current = await getCaptureState();
     const errorCode = error instanceof AsrWorkerOperationError
       ? error.code === 'cancelled'
-        ? 'transcription-cancelled'
-        : 'transcription-timeout'
+        ? 'TRANSCRIPTION_CANCELLED'
+        : 'TRANSCRIPTION_TIMEOUT'
       : undefined;
     await saveCaptureState({
       ...current,

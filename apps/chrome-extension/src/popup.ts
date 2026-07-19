@@ -11,7 +11,7 @@ import {
   type CaptureState
 } from './bridge.js';
 import type { TranscriptionMode } from './local-transcription.js';
-import { captureActionKey, isProcessingPhase } from './popup-presentation.js';
+import { captureActionKey, captureGlyphForState, isProcessingPhase } from './popup-presentation.js';
 
 const captureButton = requireElement<HTMLButtonElement>('capture');
 const actionLabel = requireElement<HTMLElement>('.popup-action-label');
@@ -152,7 +152,7 @@ function render(): void {
   headline.textContent = t('app.tagline');
   stateLabel.textContent = t(statusKey(captureState.phase));
   const captureLabel = t(captureActionKey(captureState));
-  captureButton.textContent = captureState.active || isProcessingPhase(captureState.phase) ? 'Ⅱ' : '▶';
+  captureButton.textContent = captureGlyphForState(captureState);
   captureButton.setAttribute('aria-label', captureLabel);
   actionLabel.textContent = captureLabel;
   message.textContent = captureMessage();
@@ -190,10 +190,10 @@ function render(): void {
 }
 
 function captureMessage(): string {
-  if (captureState.errorCode === 'transcription-cancelled') {
+  if (captureState.errorCode === 'TRANSCRIPTION_CANCELLED') {
     return t('error.transcriptionCancelled');
   }
-  if (captureState.errorCode === 'transcription-timeout') {
+  if (captureState.errorCode === 'TRANSCRIPTION_TIMEOUT') {
     return t('error.transcriptionTimedOut');
   }
   if (captureState.error) {
