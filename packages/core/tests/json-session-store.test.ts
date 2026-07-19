@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -27,7 +27,30 @@ describe('JsonSessionStore', () => {
     expect(restarted.getActiveSession()).toBeUndefined();
     expect(restarted.getSession(session.id)).toMatchObject({
       status: 'interrupted',
+      revision: 2,
       rawSegments: [{ text: '保留在本机。' }]
     });
+    expect(restarted.changesSince(session.id, 0)).toMatchObject({
+      revision: 2,
+      status: 'interrupted',
+      appendedSegments: [{ text: '保留在本机。' }]
+    });
+    expect(restarted.changesSince(session.id, 1)).toMatchObject({
+      revision: 2,
+      status: 'interrupted',
+      appendedSegments: []
+    });
+  });
+
+  it('atomically replaces the current snapshot without depending on a shared temp path', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'voivox-store-'));
+    temporaryDirectories.push(directory);
+    const filePath = join(directory, 'sessions.json');
+    mkdirSync(`${filePath}.tmp`);
+    const store = new JsonSessionStore(filePath);
+
+    store.save([]);
+
+    expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual([]);
   });
 });

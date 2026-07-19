@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 import type { SessionStore } from './session-store.js';
@@ -22,8 +23,15 @@ export class JsonSessionStore implements SessionStore {
 
   save(sessions: CaptureSession[]): void {
     mkdirSync(dirname(this.filePath), { recursive: true });
-    const temporaryPath = `${this.filePath}.tmp`;
-    writeFileSync(temporaryPath, JSON.stringify(sessions, null, 2), { encoding: 'utf8', mode: 0o600 });
-    renameSync(temporaryPath, this.filePath);
+    const temporaryPath = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      writeFileSync(temporaryPath, JSON.stringify(sessions, null, 2), {
+        encoding: 'utf8',
+        mode: 0o600
+      });
+      renameSync(temporaryPath, this.filePath);
+    } finally {
+      rmSync(temporaryPath, { force: true });
+    }
   }
 }

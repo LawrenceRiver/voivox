@@ -1,5 +1,15 @@
 import { createTranscriptResult, type ProcessingMode, type TranscriptResult } from './pvtt-contract.js';
 import type { SessionStore } from './session-store.js';
+import {
+  TranscriptEventStream,
+  type TranscriptDelta,
+  type TranscriptFailure,
+  type TranscriptStreamSnapshot,
+  type TranscriptStreamStatus,
+  type TranscriptWaitOptions
+} from './transcript-events.js';
+
+export type { TranscriptDelta, TranscriptFailure, TranscriptWaitOptions } from './transcript-events.js';
 
 export type CaptureSource = {
   kind: 'chrome-tab' | 'macos-process' | 'microphone';
@@ -29,10 +39,11 @@ export type DerivedTranscript = {
   text: string;
 };
 
-export type CaptureStatus = 'capturing' | 'complete' | 'interrupted';
+export type CaptureStatus = TranscriptStreamStatus;
 
 export type CaptureSession = {
   id: string;
+  revision: number;
   source: CaptureSource;
   status: CaptureStatus;
   createdAt: string;
@@ -40,12 +51,14 @@ export type CaptureSession = {
   rawSegments: RawSegment[];
   derivedTranscripts: DerivedTranscript[];
   processingMode?: ProcessingMode;
+  failure?: TranscriptFailure;
 };
 
 export class VoivoxService {
   private readonly sessions = new Map<string, CaptureSession>();
   private activeSessionId: string | undefined;
   private nextId = 1;
+  private readonly transcriptEvents = new TranscriptEventStream();
 
   constructor(
     private readonly clock: () => Date = () => new Date(),
@@ -55,13 +68,15 @@ export class VoivoxService {
     let didRecoverInterruptedSession = false;
 
     for (const recovered of recoveredSessions) {
-      const session = this.copySession(recovered);
+      const session = this.normalizeRecoveredSession(recovered);
       if (session.status === 'capturing') {
         session.status = 'interrupted';
         session.stoppedAt = this.clock().toISOString();
+        session.revision += 1;
         didRecoverInterruptedSession = true;
       }
       this.sessions.set(session.id, session);
+      this.transcriptEvents.seed(this.streamSnapshot(session));
       this.nextId = Math.max(this.nextId, numericId(session.id) + 1);
     }
 
@@ -76,7 +91,8 @@ export class VoivoxService {
     }
 
     const session: CaptureSession = {
-      id: `session_${this.nextId++}`,
+      id: `session_${this.nextId}`,
+      revision: 0,
       source,
       status: 'capturing',
       createdAt: this.clock().toISOString(),
@@ -84,9 +100,11 @@ export class VoivoxService {
       derivedTranscripts: []
     };
 
+    this.persistWith(session);
+    this.nextId += 1;
     this.sessions.set(session.id, session);
     this.activeSessionId = session.id;
-    this.persist();
+    this.transcriptEvents.seed(this.streamSnapshot(session));
     return this.copySession(session);
   }
 
@@ -94,22 +112,45 @@ export class VoivoxService {
     const session = this.requireSession(sessionId);
 
     if (session.status !== 'capturing') {
-      throw new Error(`Cannot append transcript to completed session ${sessionId}`);
+      const status = session.status === 'complete' ? 'completed' : session.status;
+      throw new Error(`Cannot append transcript to ${status} session ${sessionId}`);
     }
 
-    session.rawSegments.push({ ...segment });
-    this.persist();
+    const validated = validateSegment(segment, session.rawSegments.at(-1));
+    const next: CaptureSession = {
+      ...this.copySession(session),
+      revision: session.revision + 1,
+      rawSegments: [...session.rawSegments.map((entry) => ({ ...entry })), validated]
+    };
+    this.commitSession(next, [validated]);
   }
 
   stopCapture(sessionId: string): CaptureSession {
     const session = this.requireSession(sessionId);
-    session.status = 'complete';
-    session.stoppedAt = this.clock().toISOString();
-    if (this.activeSessionId === sessionId) {
-      this.activeSessionId = undefined;
+    if (session.status === 'complete') {
+      return this.copySession(session);
     }
-    this.persist();
-    return this.copySession(session);
+    return this.terminalTransition(session, 'complete');
+  }
+
+  failCapture(sessionId: string, failure: TranscriptFailure): CaptureSession {
+    const session = this.requireSession(sessionId);
+    if (session.status === 'failed') {
+      return this.copySession(session);
+    }
+    return this.terminalTransition(session, 'failed', validateFailure(failure));
+  }
+
+  cancelCapture(sessionId: string): CaptureSession {
+    const session = this.requireSession(sessionId);
+    if (session.status === 'cancelled') {
+      return this.copySession(session);
+    }
+    return this.terminalTransition(session, 'cancelled', {
+      code: 'TRANSCRIPTION_CANCELLED',
+      message: 'The transcription was cancelled.',
+      retryable: false
+    });
   }
 
   importCompletedCapture(
@@ -117,30 +158,28 @@ export class VoivoxService {
     rawSegments: RawSegment[],
     processingMode: ProcessingMode = 'live_tunnel'
   ): CaptureSession {
-    if (
-      rawSegments.length === 0
-      || rawSegments.some((segment) => !segment.text.trim())
-    ) {
+    if (rawSegments.length === 0 || rawSegments.some((segment) => !segment.text.trim())) {
       throw new Error('A completed capture requires transcript text.');
     }
+    const validatedSegments = validateSegments(rawSegments);
 
     const completedAt = this.clock().toISOString();
     const session: CaptureSession = {
-      id: `session_${this.nextId++}`,
+      id: `session_${this.nextId}`,
+      revision: validatedSegments.length + 1,
       source: { ...source },
       status: 'complete',
       createdAt: completedAt,
       stoppedAt: completedAt,
       processingMode,
-      rawSegments: rawSegments.map((segment) => ({
-        ...segment,
-        text: segment.text.trim()
-      })),
+      rawSegments: validatedSegments,
       derivedTranscripts: []
     };
 
+    this.persistWith(session);
+    this.nextId += 1;
     this.sessions.set(session.id, session);
-    this.persist();
+    this.transcriptEvents.seed(this.streamSnapshot(session));
     return this.copySession(session);
   }
 
@@ -155,6 +194,20 @@ export class VoivoxService {
 
   listSessions(): CaptureSession[] {
     return [...this.sessions.values()].reverse().map((session) => this.copySession(session));
+  }
+
+  changesSince(sessionId: string, afterRevision: number): TranscriptDelta {
+    this.requireSession(sessionId);
+    return this.transcriptEvents.changesSince(sessionId, afterRevision);
+  }
+
+  waitForChange(
+    sessionId: string,
+    afterRevision: number,
+    options: TranscriptWaitOptions = {}
+  ): Promise<TranscriptDelta | undefined> {
+    this.requireSession(sessionId);
+    return this.transcriptEvents.waitForChange(sessionId, afterRevision, options);
   }
 
   getLatestBrowserTranscript(): TranscriptResult | undefined {
@@ -189,9 +242,11 @@ export class VoivoxService {
     transcript: DerivedTranscript
   ): CaptureSession {
     const session = this.requireSession(sessionId);
-    session.derivedTranscripts.push({ ...transcript });
-    this.persist();
-    return this.copySession(session);
+    const next = this.copySession(session);
+    next.derivedTranscripts.push({ ...transcript });
+    this.persistWith(next);
+    this.sessions.set(next.id, next);
+    return this.copySession(next);
   }
 
   private requireSession(sessionId: string): CaptureSession {
@@ -211,12 +266,75 @@ export class VoivoxService {
       rawSegments: session.rawSegments.map((segment) => ({ ...segment })),
       derivedTranscripts: session.derivedTranscripts.map((transcript) => ({
         ...transcript
-      }))
+      })),
+      ...(session.failure ? { failure: { ...session.failure } } : {})
     };
   }
 
   private persist(): void {
     this.store?.save([...this.sessions.values()].map((session) => this.copySession(session)));
+  }
+
+  private persistWith(replacement: CaptureSession): void {
+    const sessions = [...this.sessions.values()].map((session) => (
+      session.id === replacement.id ? replacement : session
+    ));
+    if (!this.sessions.has(replacement.id)) {
+      sessions.push(replacement);
+    }
+    this.store?.save(sessions.map((session) => this.copySession(session)));
+  }
+
+  private commitSession(next: CaptureSession, appendedSegments: RawSegment[] = []): CaptureSession {
+    this.persistWith(next);
+    this.sessions.set(next.id, next);
+    this.transcriptEvents.publish(this.streamSnapshot(next), appendedSegments);
+    return this.copySession(next);
+  }
+
+  private terminalTransition(
+    session: CaptureSession,
+    status: 'complete' | 'failed' | 'cancelled',
+    failure?: TranscriptFailure
+  ): CaptureSession {
+    if (session.status !== 'capturing') {
+      throw new Error(`Cannot transition ${session.id} from ${session.status} to ${status}.`);
+    }
+    const next: CaptureSession = {
+      ...this.copySession(session),
+      status,
+      revision: session.revision + 1,
+      stoppedAt: this.clock().toISOString(),
+      ...(failure ? { failure: { ...failure } } : {})
+    };
+    const committed = this.commitSession(next);
+    if (this.activeSessionId === session.id) {
+      this.activeSessionId = undefined;
+    }
+    return committed;
+  }
+
+  private streamSnapshot(session: CaptureSession): TranscriptStreamSnapshot {
+    return {
+      sessionId: session.id,
+      revision: session.revision,
+      status: session.status,
+      rawSegments: session.rawSegments,
+      ...(session.failure ? { failure: { ...session.failure } } : {})
+    };
+  }
+
+  private normalizeRecoveredSession(recovered: CaptureSession): CaptureSession {
+    const copy = this.copySession({
+      ...recovered,
+      revision: Number.isSafeInteger(recovered.revision) && recovered.revision >= 0
+        ? recovered.revision
+        : inferredLegacyRevision(recovered)
+    });
+    if (copy.status !== 'failed' && copy.status !== 'cancelled') {
+      delete copy.failure;
+    }
+    return copy;
   }
 }
 
@@ -232,4 +350,40 @@ function isHttpUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function inferredLegacyRevision(session: CaptureSession): number {
+  return session.rawSegments.length + (session.status === 'capturing' ? 0 : 1);
+}
+
+function validateSegments(segments: RawSegment[]): RawSegment[] {
+  const validated: RawSegment[] = [];
+  for (const segment of segments) {
+    validated.push(validateSegment(segment, validated.at(-1)));
+  }
+  return validated;
+}
+
+function validateSegment(segment: RawSegment, previous?: RawSegment): RawSegment {
+  if (!Number.isFinite(segment.startMs) || !Number.isFinite(segment.endMs)) {
+    throw new Error('Transcript segment times must be finite.');
+  }
+  if (segment.startMs < 0 || segment.endMs <= segment.startMs) {
+    throw new Error('Transcript segments require a nonnegative start and positive duration.');
+  }
+  const text = segment.text.trim();
+  if (!text) {
+    throw new Error('Transcript segment text must be nonempty.');
+  }
+  if (previous && segment.startMs < previous.endMs) {
+    throw new Error('Transcript segments must be ordered and nonoverlapping.');
+  }
+  return { ...segment, text };
+}
+
+function validateFailure(failure: TranscriptFailure): TranscriptFailure {
+  if (!failure.code || !failure.message.trim()) {
+    throw new Error('Capture failure requires a stable code and nonempty message.');
+  }
+  return { ...failure, message: failure.message.trim() };
 }

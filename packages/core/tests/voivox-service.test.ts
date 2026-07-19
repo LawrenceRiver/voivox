@@ -3,6 +3,105 @@ import { describe, expect, it } from 'vitest';
 import { VoivoxService } from '../src/voivox-service.js';
 
 describe('VoivoxService', () => {
+  it('publishes one monotonic revision for every append and terminal transition', () => {
+    const service = new VoivoxService();
+    const session = service.startCapture({ kind: 'chrome-tab', label: 'Revision source' });
+    expect(session.revision).toBe(0);
+
+    service.appendRawSegment(session.id, { startMs: 0, endMs: 1_000, text: 'first' });
+    expect(service.changesSince(session.id, 0)).toMatchObject({
+      afterRevision: 0,
+      revision: 1,
+      status: 'capturing',
+      appendedSegments: [{ text: 'first' }]
+    });
+
+    service.appendRawSegment(session.id, { startMs: 1_000, endMs: 2_000, text: 'second' });
+    expect(service.changesSince(session.id, 1)).toMatchObject({
+      afterRevision: 1,
+      revision: 2,
+      status: 'capturing',
+      appendedSegments: [{ text: 'second' }]
+    });
+
+    const completed = service.stopCapture(session.id);
+    expect(completed.revision).toBe(3);
+    expect(service.changesSince(session.id, 2)).toMatchObject({
+      revision: 3,
+      status: 'complete',
+      appendedSegments: []
+    });
+  });
+
+  it('publishes typed failed and cancelled terminal sessions exactly once', () => {
+    const service = new VoivoxService();
+    const failed = service.startCapture({ kind: 'chrome-tab', label: 'Failure source' });
+    expect(service.failCapture(failed.id, {
+      code: 'ASR_INFERENCE_FAILED',
+      message: 'Local speech recognition failed.',
+      retryable: true
+    })).toMatchObject({
+      revision: 1,
+      status: 'failed',
+      failure: { code: 'ASR_INFERENCE_FAILED', retryable: true }
+    });
+    expect(service.failCapture(failed.id, {
+      code: 'ASR_INFERENCE_FAILED',
+      message: 'Local speech recognition failed.',
+      retryable: true
+    }).revision).toBe(1);
+
+    const cancelled = service.startCapture({ kind: 'chrome-tab', label: 'Cancelled source' });
+    expect(service.cancelCapture(cancelled.id)).toMatchObject({
+      revision: 1,
+      status: 'cancelled',
+      failure: { code: 'TRANSCRIPTION_CANCELLED', retryable: false }
+    });
+    expect(service.cancelCapture(cancelled.id).revision).toBe(1);
+  });
+
+  it('rejects empty, backwards, overlapping, and non-finite segments without publishing', () => {
+    const service = new VoivoxService();
+    const session = service.startCapture({ kind: 'chrome-tab', label: 'Validated source' });
+
+    expect(() => service.appendRawSegment(
+      session.id,
+      { startMs: 0, endMs: 1_000, text: '   ' }
+    )).toThrow(/nonempty/i);
+    expect(() => service.appendRawSegment(
+      session.id,
+      { startMs: 100, endMs: 100, text: 'backwards' }
+    )).toThrow(/positive duration/i);
+    expect(() => service.appendRawSegment(
+      session.id,
+      { startMs: Number.NaN, endMs: 100, text: 'non-finite' }
+    )).toThrow(/finite/i);
+
+    service.appendRawSegment(session.id, { startMs: 0, endMs: 1_000, text: 'valid' });
+    expect(() => service.appendRawSegment(
+      session.id,
+      { startMs: 999, endMs: 2_000, text: 'overlap' }
+    )).toThrow(/ordered and nonoverlapping/i);
+    expect(service.getSession(session.id)).toMatchObject({ revision: 1 });
+  });
+
+  it('waits for exactly the next revision and supports cancellation', async () => {
+    const service = new VoivoxService();
+    const session = service.startCapture({ kind: 'chrome-tab', label: 'Waiting source' });
+    const waiting = service.waitForChange(session.id, 0, { waitMs: 1_000 });
+
+    service.appendRawSegment(session.id, { startMs: 0, endMs: 500, text: 'new words' });
+
+    await expect(waiting).resolves.toMatchObject({ revision: 1, status: 'capturing' });
+    const controller = new AbortController();
+    const aborted = service.waitForChange(session.id, 1, {
+      signal: controller.signal,
+      waitMs: 1_000
+    });
+    controller.abort();
+    await expect(aborted).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('creates a capture session and accepts timestamped raw segments', () => {
     const service = new VoivoxService();
 
@@ -138,5 +237,17 @@ describe('VoivoxService', () => {
       { kind: 'chrome-tab', label: 'Silent tab' },
       [{ startMs: 0, endMs: 500, text: '   ' }]
     )).toThrow('completed capture requires transcript text');
+  });
+
+  it('rejects overlapping segments in completed imports', () => {
+    const service = new VoivoxService();
+
+    expect(() => service.importCompletedCapture(
+      { kind: 'chrome-tab', label: 'Bad import' },
+      [
+        { startMs: 0, endMs: 1_000, text: 'first' },
+        { startMs: 900, endMs: 2_000, text: 'overlap' }
+      ]
+    )).toThrow(/ordered and nonoverlapping/i);
   });
 });
