@@ -227,7 +227,7 @@ struct HoseRodTests {
         }
     }
 
-    @Test("retraction removes reservoir-side nodes monotonically without teleporting material")
+    @Test("retraction removes reservoir nodes monotonically while retaining material identity")
     func monotonicRetraction() {
         var rod = HoseRod(configuration: .voiceVAC, seed: 42)
         expectSuccess(rod.pinRoot(.zero, orientation: .identity))
@@ -240,20 +240,15 @@ struct HoseRodTests {
         var previousLength = rod.activeLength
         var previousCount = rod.activeNodeCount
         for amount in [37.0, 95.0, 210.0, 600.0] {
-            let beforeByMaterial = Dictionary(
-                uniqueKeysWithValues: rod.snapshot.joints.map { ($0.materialID, $0.position) }
-            )
-            rod.retract(by: amount)
+            let beforeMaterial = Set(rod.snapshot.joints.map(\.materialID))
+            expectDeploymentSuccess(rod.retract(by: amount))
             let after = rod.snapshot
 
             #expect(rod.activeLength <= previousLength)
             #expect(rod.activeLength >= 0)
             #expect(rod.activeNodeCount <= previousCount)
-            for joint in after.joints.dropFirst().dropLast() {
-                if let previous = beforeByMaterial[joint.materialID] {
-                    #expect(joint.position == previous)
-                }
-            }
+            #expect(Set(after.joints.map(\.materialID)).isSubset(of: beforeMaterial))
+            #expect(rod.maximumSegmentStrain < 0.08)
             previousLength = rod.activeLength
             previousCount = rod.activeNodeCount
         }
@@ -447,6 +442,33 @@ struct HoseRodTests {
         }
     }
 
+    @Test("same-topology active-length changes refit the reservoir without strain")
+    func sameTopologyLengthChangeHasNoPop() {
+        var rod = HoseRod(configuration: .voiceVAC, seed: 67)
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: SIMD3(420, 0, 0),
+                tipOrientation: .identity,
+                activeLength: 500
+            )
+        )
+        for _ in 0..<120 {
+            expectSuccess(rod.step(deltaTime: step, iterations: 20))
+        }
+        let nodeCount = rod.activeNodeCount
+
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: SIMD3(420, 0, 0),
+                tipOrientation: .identity,
+                activeLength: 490
+            )
+        )
+
+        #expect(rod.activeNodeCount == nodeCount)
+        #expect(rod.maximumSegmentStrain < 0.08)
+    }
+
     @Test("topology hysteresis prevents node churn around a bay boundary")
     func topologyBoundaryHysteresis() {
         var rod = HoseRod(configuration: .voiceVAC, seed: 77)
@@ -469,7 +491,51 @@ struct HoseRodTests {
                 )
             )
             #expect(rod.activeNodeCount == stableCount)
+            #expect(rod.maximumSegmentStrain < 0.08)
         }
+
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: SIMD3(boundary * 0.8, 0, 0),
+                tipOrientation: .identity,
+                activeLength: boundary + 1
+            )
+        )
+        let upperCount = rod.activeNodeCount
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: SIMD3(boundary * 0.8, 0, 0),
+                tipOrientation: .identity,
+                activeLength: boundary - 0.2
+            )
+        )
+        #expect(rod.activeNodeCount == upperCount)
+        #expect(rod.maximumSegmentStrain < 0.08)
+    }
+
+    @Test("atomic deployment rejects a span below the selected topology minimum reach")
+    func atomicDeploymentRejectsUnrepresentableTopology() {
+        var rod = HoseRod(configuration: .voiceVAC, seed: 78)
+        let before = rod.snapshot
+        let requestedLength = rod.configuration.naturalSegmentLength + 0.5
+
+        let result = rod.updateDeployment(
+            tipPosition: .zero,
+            tipOrientation: .identity,
+            activeLength: requestedLength
+        )
+
+        guard case let .failure(
+            .infeasibleTopology(span, minimumReach, availableLength, nodeCount)
+        ) = result else {
+            Issue.record("Expected typed topology infeasibility, got \(result)")
+            return
+        }
+        #expect(span == 0)
+        #expect(minimumReach > 0)
+        #expect(availableLength == requestedLength)
+        #expect(nodeCount >= 2)
+        #expect(rod.snapshot == before)
     }
 
     @Test("parallel-transport frames cross negative X without quaternion flips")
@@ -535,6 +601,71 @@ struct HoseRodTests {
         for pair in zip(joints, joints.dropFirst()) {
             #expect(quaternionGeodesic(pair.0.orientation, pair.1.orientation) < 0.30)
         }
+    }
+
+    @Test("abrupt tip swing is rate-limited and cannot report unsafe success")
+    func abruptTipSwingIsRateLimited() {
+        var rod = HoseRod(configuration: .voiceVAC, seed: 112)
+        let tip = SIMD3<Double>(720, 0, 0)
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: tip,
+                tipOrientation: .identity,
+                activeLength: 800
+            )
+        )
+        for _ in 0..<120 {
+            expectSuccess(rod.step(deltaTime: step, iterations: 24))
+        }
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: tip,
+                tipOrientation: simd_quatd(
+                    angle: .pi,
+                    axis: SIMD3<Double>(0, 1, 0)
+                ),
+                activeLength: 800
+            )
+        )
+
+        var eventuallySucceeded = false
+        var sawTypedFailure = false
+        for _ in 0..<8 {
+            let before = Dictionary(
+                uniqueKeysWithValues: rod.snapshot.joints.map {
+                    ($0.materialID, $0.orientation)
+                }
+            )
+            let succeeded = rod.step(deltaTime: step, iterations: 24)
+            let after = rod.snapshot.joints
+            for joint in after.dropFirst().dropLast() {
+                if let previous = before[joint.materialID] {
+                    #expect(quaternionGeodesic(previous, joint.orientation) <= 1.10)
+                }
+            }
+
+            let maximumAdjacent = zip(after, after.dropFirst()).reduce(0.0) {
+                max($0, quaternionGeodesic($1.0.orientation, $1.1.orientation))
+            }
+            if succeeded {
+                #expect(maximumAdjacent <= 1.10)
+                eventuallySucceeded = true
+                break
+            }
+            guard case .angularLimitExceeded = rod.lastFailure else {
+                Issue.record("Expected typed angular failure, got \(String(describing: rod.lastFailure))")
+                break
+            }
+            sawTypedFailure = true
+        }
+        #expect(sawTypedFailure)
+        #expect(eventuallySucceeded)
+        #expect(
+            quaternionGeodesic(
+                rod.snapshot.joints.last!.orientation,
+                simd_quatd(angle: .pi, axis: SIMD3<Double>(0, 1, 0))
+            ) < 1e-12
+        )
     }
 
     @Test("snapshot maps deterministically to exactly 64 rig joints")

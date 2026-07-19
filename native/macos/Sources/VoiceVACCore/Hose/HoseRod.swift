@@ -8,7 +8,18 @@ public enum HoseSimulationFailure: Error, Equatable, Sendable {
     case invalidActiveLength
     case activeLengthOutOfRange(requested: Double, maximum: Double)
     case infeasibleSpan(span: Double, availableLength: Double)
+    case infeasibleTopology(
+        span: Double,
+        minimumReach: Double,
+        availableLength: Double,
+        nodeCount: Int
+    )
     case strainLimitExceeded(maximum: Double, allowed: Double)
+    case angularLimitExceeded(
+        maximumTemporal: Double,
+        maximumAdjacent: Double,
+        allowed: Double
+    )
     case nonFiniteState
 }
 
@@ -169,7 +180,12 @@ public struct HoseRod: Sendable {
             return true
         }
 
-        setActiveLengthUnchecked(clamped)
+        let span = simd_distance(rootPin.position, tipPin.position)
+        let nodeCount = resolvedNodeCount(
+            for: clamped,
+            span: span
+        ) ?? desiredNodeCount(for: clamped, currentCount: nodes.count)
+        setActiveLengthUnchecked(clamped, nodeCount: nodeCount)
         lastFailure = nil
         return true
     }
@@ -206,14 +222,35 @@ public struct HoseRod: Sendable {
             lastFailure = failure
             return .failure(failure)
         }
+        guard let resolvedNodeCount = resolvedNodeCount(
+            for: requestedLength,
+            span: span
+        ) else {
+            let idealCount = idealNodeCount(for: requestedLength)
+            let minimumReach = topologyReachBounds(
+                for: requestedLength,
+                nodeCount: idealCount
+            ).minimum
+            let failure = HoseSimulationFailure.infeasibleTopology(
+                span: span,
+                minimumReach: minimumReach,
+                availableLength: requestedLength,
+                nodeCount: idealCount
+            )
+            lastFailure = failure
+            return .failure(failure)
+        }
 
         tipPin = (tipPosition, tipOrientation)
         let last = nodes.count - 1
         nodes[last].position = tipPosition
         nodes[last].previousPosition = tipPosition
         nodes[last].orientation = tipOrientation
-        if requestedLength != activeLength {
-            setActiveLengthUnchecked(requestedLength)
+        if requestedLength != activeLength || resolvedNodeCount != nodes.count {
+            setActiveLengthUnchecked(
+                requestedLength,
+                nodeCount: resolvedNodeCount
+            )
         }
         hasExplicitTipPin = true
         projectPins()
@@ -247,11 +284,16 @@ public struct HoseRod: Sendable {
         )
     }
 
-    private mutating func setActiveLengthUnchecked(_ length: Double) {
+    private mutating func setActiveLengthUnchecked(
+        _ length: Double,
+        nodeCount: Int
+    ) {
         let previousCount = nodes.count
+        let previousMaterialIDs = Set(nodes.map(\.materialID))
         activeLength = length
-        let desiredCount = desiredNodeCount(for: length, currentCount: previousCount)
-        reconcileTopology(from: previousCount, to: desiredCount)
+        reconcileTopology(from: previousCount, to: nodeCount)
+        refitToRestGeometryIfNeeded()
+        initializeNewMaterialOrientations(previousMaterialIDs: previousMaterialIDs)
         rebuildConstraints()
         projectPins()
     }
@@ -273,6 +315,19 @@ public struct HoseRod: Sendable {
         let span = simd_distance(rootPin.position, tipPin.position)
         guard span <= activeLength + 1e-9 else {
             lastFailure = .infeasibleSpan(span: span, availableLength: activeLength)
+            return false
+        }
+        let reach = topologyReachBounds(
+            for: activeLength,
+            nodeCount: nodes.count
+        )
+        guard span + 1e-9 >= reach.minimum else {
+            lastFailure = .infeasibleTopology(
+                span: span,
+                minimumReach: reach.minimum,
+                availableLength: activeLength,
+                nodeCount: nodes.count
+            )
             return false
         }
 
@@ -325,6 +380,10 @@ public struct HoseRod: Sendable {
         }
 
         solveOrientations(deltaTime: deltaTime, iterations: iterations)
+        let maximumTemporalAngle = clampAngularMotion(
+            relativeTo: rollbackNodes,
+            maximumAngle: 1.0
+        )
         projectPins()
         stabilizeVerletHistory(relativeTo: rollbackNodes)
 
@@ -343,14 +402,30 @@ public struct HoseRod: Sendable {
             lastFailure = .strainLimitExceeded(maximum: strain, allowed: allowedStrain)
             return false
         }
+        let allowedAngularChange = 1.10
+        let maximumAdjacentAngle = maximumAdjacentOrientationAngle()
+        guard maximumTemporalAngle <= allowedAngularChange + 1e-9,
+              maximumAdjacentAngle <= allowedAngularChange + 1e-9
+        else {
+            lastFailure = .angularLimitExceeded(
+                maximumTemporal: maximumTemporalAngle,
+                maximumAdjacent: maximumAdjacentAngle,
+                allowed: allowedAngularChange
+            )
+            return false
+        }
         lastFailure = nil
         return true
     }
 
-    private func desiredNodeCount(for length: Double, currentCount: Int) -> Int {
+    private func idealNodeCount(for length: Double) -> Int {
         guard length > 0 else { return 2 }
         let segments = Int(ceil(length / configuration.naturalSegmentLength))
-        let ideal = min(configuration.maximumNodeCount, max(2, segments + 1))
+        return min(configuration.maximumNodeCount, max(2, segments + 1))
+    }
+
+    private func desiredNodeCount(for length: Double, currentCount: Int) -> Int {
+        let ideal = idealNodeCount(for: length)
         let hysteresis = min(0.5, configuration.naturalSegmentLength * 0.02)
         if ideal > currentCount {
             let boundary = Double(currentCount - 1) * configuration.naturalSegmentLength
@@ -364,6 +439,41 @@ public struct HoseRod: Sendable {
             }
         }
         return ideal
+    }
+
+    private func resolvedNodeCount(
+        for length: Double,
+        span: Double
+    ) -> Int? {
+        let preferred = desiredNodeCount(for: length, currentCount: nodes.count)
+        if topologyCanRepresent(span: span, length: length, nodeCount: preferred) {
+            return preferred
+        }
+        let ideal = idealNodeCount(for: length)
+        if ideal != preferred,
+           topologyCanRepresent(span: span, length: length, nodeCount: ideal) {
+            return ideal
+        }
+        return nil
+    }
+
+    private func topologyCanRepresent(
+        span: Double,
+        length: Double,
+        nodeCount: Int
+    ) -> Bool {
+        let bounds = topologyReachBounds(for: length, nodeCount: nodeCount)
+        return span + 1e-9 >= bounds.minimum && span <= bounds.maximum + 1e-9
+    }
+
+    private func topologyReachBounds(
+        for length: Double,
+        nodeCount: Int
+    ) -> (minimum: Double, maximum: Double) {
+        let lengths = restSegmentLengths(for: nodeCount, activeLength: length)
+        let maximum = lengths.reduce(0, +)
+        let longest = lengths.max() ?? 0
+        return (max(0, 2 * longest - maximum), maximum)
     }
 
     private mutating func reconcileTopology(from oldCount: Int, to newCount: Int) {
@@ -472,11 +582,31 @@ public struct HoseRod: Sendable {
         let node = HoseNode(
             materialID: nextMaterialID,
             position: position,
-            orientation: orientationFromForward(tipPin.position - rootPin.position),
+            orientation: rootPin.orientation,
             inverseMass: 1
         )
         nextMaterialID &+= 1
         return node
+    }
+
+    private mutating func initializeNewMaterialOrientations(
+        previousMaterialIDs: Set<UInt64>
+    ) {
+        guard nodes.count > 2 else { return }
+        let lengths = restSegmentLengths()
+        var cumulative = 0.0
+        for index in 1..<(nodes.count - 1) {
+            cumulative += lengths[index - 1]
+            guard !previousMaterialIDs.contains(nodes[index].materialID) else { continue }
+            let fraction = activeLength > 1e-9
+                ? min(max(cumulative / activeLength, 0), 1)
+                : Double(index) / Double(nodes.count - 1)
+            nodes[index].orientation = hemisphereSlerp(
+                rootPin.orientation,
+                tipPin.orientation,
+                fraction: fraction
+            )
+        }
     }
 
     private mutating func layoutInteriorAlongRestCurve() {
@@ -541,21 +671,59 @@ public struct HoseRod: Sendable {
     }
 
     private func restSegmentLengths() -> [Double] {
-        restSegmentLengths(for: nodes.count)
+        restSegmentLengths(for: nodes.count, activeLength: activeLength)
     }
 
     private func restSegmentLengths(for count: Int) -> [Double] {
+        restSegmentLengths(for: count, activeLength: activeLength)
+    }
+
+    private func restSegmentLengths(
+        for count: Int,
+        activeLength length: Double
+    ) -> [Double] {
         guard count >= 2 else { return [] }
         let segmentCount = count - 1
-        if segmentCount == 1 {
-            return [max(activeLength, 1e-6)]
+        guard length > 0 else {
+            return Array(repeating: 0, count: segmentCount)
         }
-        let fullTailLength = configuration.naturalSegmentLength * Double(segmentCount - 1)
-        let reservoirSegment = max(activeLength - fullTailLength, 1e-6)
-        return [reservoirSegment] + Array(
-            repeating: configuration.naturalSegmentLength,
-            count: segmentCount - 1
+        let epsilon = min(1e-6, length / Double(segmentCount * 1_024))
+        var lengths = Array(repeating: epsilon, count: segmentCount)
+        var remaining = max(0, length - epsilon * Double(segmentCount))
+        for index in stride(from: segmentCount - 1, through: 0, by: -1) {
+            let capacity = configuration.naturalSegmentLength - lengths[index]
+            let addition = min(max(0, capacity), remaining)
+            lengths[index] += addition
+            remaining -= addition
+        }
+        // Hysteresis may retain one fewer node for a sub-point interval. Keep the
+        // exact material sum by allowing only the root reservoir bay to absorb it.
+        if remaining > 0 {
+            lengths[0] += remaining
+        }
+        return lengths
+    }
+
+    private mutating func refitToRestGeometryIfNeeded() {
+        guard nodes.count > 2, maximumSegmentStrain >= 0.08 else { return }
+        let lengths = restSegmentLengths()
+        let span = simd_distance(rootPin.position, tipPin.position)
+        guard topologyCanRepresent(
+            span: span,
+            length: activeLength,
+            nodeCount: nodes.count
+        ) else { return }
+        let points = naturalBridgePoints(
+            from: rootPin.position,
+            to: tipPin.position,
+            segmentLengths: lengths
         )
+        guard points.count == nodes.count else { return }
+        for index in 1..<(nodes.count - 1) {
+            nodes[index].position = points[index]
+            nodes[index].previousPosition = points[index]
+        }
+        projectPins()
     }
 
     private mutating func rebuildConstraints() {
@@ -665,8 +833,8 @@ public struct HoseRod: Sendable {
     }
 
     /// Builds a Bishop (parallel-transport) frame field and distributes the
-    /// nozzle's explicit swivel as local-X twist. Arbitrary endpoint swing stays
-    /// confined to the hard-pinned nozzle instead of rolling the entire hose.
+    /// nozzle's explicit local-X twist before projecting the full endpoint swing
+    /// into a bounded spatial frame chain.
     private func transportedMaterialFrames() -> [simd_quatd] {
         guard nodes.count >= 2 else { return nodes.map(\.orientation) }
         var tangents: [SIMD3<Double>] = []
@@ -764,54 +932,96 @@ public struct HoseRod: Sendable {
 
         func bounded(
             from anchor: simd_quatd,
-            toward candidate: simd_quatd
+            toward candidate: simd_quatd,
+            limit: Double
         ) -> simd_quatd {
-            let dot = abs(simd_dot(anchor.vector, candidate.vector))
-            let angle = 2 * acos(max(-1, min(1, dot)))
-            guard angle > maximumAdjacentAngle else { return candidate }
+            let angle = orientationAngle(anchor, candidate)
+            guard angle > limit else { return candidate }
             return hemisphereSlerp(
                 anchor,
                 candidate,
-                fraction: maximumAdjacentAngle / angle
+                fraction: limit / angle
             )
         }
 
-        // Alternating forward/backward projections solve the bounded-rotation
-        // chain while retaining exact endpoint frames whenever the nozzle's
-        // forward axis agrees with the final centerline tangent.
-        let projectionPasses = tipTracksCenterline ? 32 : 1
-        for _ in 0..<projectionPasses {
+        frames[0] = rootPin.orientation
+        for index in 1..<last {
+            frames[index] = bounded(
+                from: frames[index - 1],
+                toward: frames[index],
+                limit: maximumAdjacentAngle
+            )
+        }
+
+        // Large endpoint swing is allowed a looser one-radian spatial envelope;
+        // aligned swivel retains the close 0.26-radian corrugation continuity.
+        let spatialLimit = tipTracksCenterline ? maximumAdjacentAngle : 1.0
+        for _ in 0..<32 {
             frames[0] = rootPin.orientation
             for index in 1..<last {
                 frames[index] = bounded(
                     from: frames[index - 1],
-                    toward: frames[index]
+                    toward: frames[index],
+                    limit: spatialLimit
                 )
             }
-            guard tipTracksCenterline else { continue }
             frames[last] = tipPin.orientation
             for index in stride(from: last - 1, through: 1, by: -1) {
                 frames[index] = bounded(
                     from: frames[index + 1],
-                    toward: frames[index]
+                    toward: frames[index],
+                    limit: spatialLimit
                 )
             }
+            let maximum = zip(frames, frames.dropFirst()).reduce(0.0) {
+                max($0, orientationAngle($1.0, $1.1))
+            }
+            if maximum <= spatialLimit + 1e-9 { break }
         }
         frames[0] = rootPin.orientation
         frames[last] = tipPin.orientation
-        if !tipTracksCenterline {
-            let candidate = frames[last - 1]
-            let dot = abs(simd_dot(frames[last].vector, candidate.vector))
-            let angle = 2 * acos(max(-1, min(1, dot)))
-            if angle > 1.0 {
-                frames[last - 1] = hemisphereSlerp(
-                    frames[last],
-                    candidate,
-                    fraction: 1.0 / angle
+        return frames
+    }
+
+    private mutating func clampAngularMotion(
+        relativeTo previousNodes: [HoseNode],
+        maximumAngle: Double
+    ) -> Double {
+        guard nodes.count > 2 else { return 0 }
+        let previousByID = Dictionary(
+            uniqueKeysWithValues: previousNodes.map { ($0.materialID, $0.orientation) }
+        )
+        var observedMaximum = 0.0
+        for index in 1..<(nodes.count - 1) {
+            guard let previous = previousByID[nodes[index].materialID] else { continue }
+            let angle = orientationAngle(previous, nodes[index].orientation)
+            if angle > maximumAngle {
+                nodes[index].orientation = hemisphereSlerp(
+                    previous,
+                    nodes[index].orientation,
+                    fraction: maximumAngle / angle
                 )
             }
+            observedMaximum = max(
+                observedMaximum,
+                orientationAngle(previous, nodes[index].orientation)
+            )
         }
-        return frames
+        return observedMaximum
+    }
+
+    private func maximumAdjacentOrientationAngle() -> Double {
+        zip(nodes, nodes.dropFirst()).reduce(0) { maximum, pair in
+            max(maximum, orientationAngle(pair.0.orientation, pair.1.orientation))
+        }
+    }
+
+    private func orientationAngle(
+        _ first: simd_quatd,
+        _ second: simd_quatd
+    ) -> Double {
+        let dot = abs(simd_dot(first.vector, second.vector))
+        return 2 * acos(max(-1, min(1, dot)))
     }
 
     private mutating func stabilizeVerletHistory(relativeTo oldNodes: [HoseNode]) {
