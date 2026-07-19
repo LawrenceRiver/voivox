@@ -1,15 +1,28 @@
 import Foundation
 import simd
 
+public enum HoseSimulationFailure: Error, Equatable, Sendable {
+    case invalidTimeStep
+    case invalidIterationCount
+    case nonFinitePin
+    case invalidActiveLength
+    case activeLengthOutOfRange(requested: Double, maximum: Double)
+    case infeasibleSpan(span: Double, availableLength: Double)
+    case strainLimitExceeded(maximum: Double, allowed: Double)
+    case nonFiniteState
+}
+
 public struct HoseRod: Sendable {
     public let configuration: HoseConfiguration
     public private(set) var activeLength: Double
+    public private(set) var lastFailure: HoseSimulationFailure?
 
     private let seed: UInt64
     private var nodes: [HoseNode]
     private var stretchConstraints: [XPBDDistanceConstraint]
     private var bendConstraints: [XPBDDistanceConstraint]
-    private var orientationLambdas: [Double]
+    private var orientationLambdas: [SIMD3<Double>]
+    private var angularContinuityConstraints: [XPBDAngularContinuityConstraint]
     private var rootPin: (position: SIMD3<Double>, orientation: simd_quatd)
     private var tipPin: (position: SIMD3<Double>, orientation: simd_quatd)
     private var nextMaterialID: UInt64
@@ -18,6 +31,7 @@ public struct HoseRod: Sendable {
     public init(configuration: HoseConfiguration, seed: UInt64) {
         self.configuration = configuration
         self.seed = seed
+        lastFailure = nil
         activeLength = configuration.naturalSegmentLength
         let root = HoseNode(
             materialID: 0,
@@ -39,7 +53,8 @@ public struct HoseRod: Sendable {
         hasExplicitTipPin = false
         stretchConstraints = []
         bendConstraints = []
-        orientationLambdas = [0, 0]
+        orientationLambdas = [.zero, .zero]
+        angularContinuityConstraints = []
         rebuildConstraints()
     }
 
@@ -48,12 +63,25 @@ public struct HoseRod: Sendable {
     }
 
     public var snapshot: HoseSnapshot {
-        HoseSnapshot(
+        let lengths = restSegmentLengths()
+        let safeMaximum = max(configuration.maximumActiveLength, 1e-9)
+        let reservoirBoundary = min(max(1 - activeLength / safeMaximum, 0), 1)
+        var cumulative = 0.0
+        return HoseSnapshot(
             activeLength: activeLength,
+            maximumActiveLength: configuration.maximumActiveLength,
             joints: nodes.enumerated().map { index, node in
-                HoseJointSample(
+                if index > 0 {
+                    cumulative += lengths[index - 1]
+                }
+                let activeFraction = activeLength > 1e-9
+                    ? min(max(cumulative / activeLength, 0), 1)
+                    : 0
+                return HoseJointSample(
                     jointIndex: index,
                     materialID: node.materialID,
+                    normalizedMaterialCoordinate: reservoirBoundary +
+                        activeFraction * (1 - reservoirBoundary),
                     position: node.position,
                     orientation: node.orientation
                 )
@@ -89,13 +117,17 @@ public struct HoseRod: Sendable {
     ) -> Bool {
         guard vectorIsFinite(position),
               let orientation = safeNormalizedQuaternion(orientation)
-        else { return false }
+        else {
+            lastFailure = .nonFinitePin
+            return false
+        }
 
         rootPin = (position, orientation)
         nodes[0].position = position
         nodes[0].previousPosition = position
         nodes[0].orientation = orientation
         nodes[0].inverseMass = 0
+        lastFailure = nil
         return true
     }
 
@@ -106,7 +138,10 @@ public struct HoseRod: Sendable {
     ) -> Bool {
         guard vectorIsFinite(position),
               let orientation = safeNormalizedQuaternion(orientation)
-        else { return false }
+        else {
+            lastFailure = .nonFinitePin
+            return false
+        }
 
         tipPin = (position, orientation)
         nodes[nodes.count - 1].position = position
@@ -118,27 +153,107 @@ public struct HoseRod: Sendable {
             rebuildConstraints()
         }
         hasExplicitTipPin = true
+        lastFailure = nil
         return true
     }
 
     @discardableResult
     public mutating func setActiveLength(_ requestedLength: Double) -> Bool {
-        guard requestedLength.isFinite else { return false }
+        guard requestedLength.isFinite else {
+            lastFailure = .invalidActiveLength
+            return false
+        }
         let clamped = min(max(requestedLength, 0), configuration.maximumActiveLength)
-        guard clamped != activeLength else { return true }
+        guard clamped != activeLength else {
+            lastFailure = nil
+            return true
+        }
 
-        let previousCount = nodes.count
-        activeLength = clamped
-        let desiredCount = desiredNodeCount(for: clamped)
-        reconcileTopology(from: previousCount, to: desiredCount)
-        rebuildConstraints()
-        projectPins()
+        setActiveLengthUnchecked(clamped)
+        lastFailure = nil
         return true
     }
 
-    public mutating func retract(by amount: Double) {
-        guard amount.isFinite, amount > 0 else { return }
-        _ = setActiveLength(activeLength - amount)
+    public mutating func updateDeployment(
+        tipPosition: SIMD3<Double>,
+        tipOrientation: simd_quatd,
+        activeLength requestedLength: Double
+    ) -> Result<Void, HoseSimulationFailure> {
+        guard vectorIsFinite(tipPosition),
+              let tipOrientation = safeNormalizedQuaternion(tipOrientation)
+        else {
+            lastFailure = .nonFinitePin
+            return .failure(.nonFinitePin)
+        }
+        guard requestedLength.isFinite, requestedLength >= 0 else {
+            lastFailure = .invalidActiveLength
+            return .failure(.invalidActiveLength)
+        }
+        guard requestedLength <= configuration.maximumActiveLength else {
+            let failure = HoseSimulationFailure.activeLengthOutOfRange(
+                requested: requestedLength,
+                maximum: configuration.maximumActiveLength
+            )
+            lastFailure = failure
+            return .failure(failure)
+        }
+        let span = simd_distance(rootPin.position, tipPosition)
+        guard span <= requestedLength + 1e-9 else {
+            let failure = HoseSimulationFailure.infeasibleSpan(
+                span: span,
+                availableLength: requestedLength
+            )
+            lastFailure = failure
+            return .failure(failure)
+        }
+
+        tipPin = (tipPosition, tipOrientation)
+        let last = nodes.count - 1
+        nodes[last].position = tipPosition
+        nodes[last].previousPosition = tipPosition
+        nodes[last].orientation = tipOrientation
+        if requestedLength != activeLength {
+            setActiveLengthUnchecked(requestedLength)
+        }
+        hasExplicitTipPin = true
+        projectPins()
+        lastFailure = nil
+        return .success(())
+    }
+
+    @discardableResult
+    public mutating func retract(
+        by amount: Double
+    ) -> Result<Void, HoseSimulationFailure> {
+        guard amount.isFinite, amount >= 0 else {
+            lastFailure = .invalidActiveLength
+            return .failure(.invalidActiveLength)
+        }
+        let newLength = max(activeLength - amount, 0)
+        let delta = tipPin.position - rootPin.position
+        let span = simd_length(delta)
+        let newTip: SIMD3<Double>
+        if span > newLength, span > 1e-12 {
+            newTip = rootPin.position + delta / span * newLength
+        } else if newLength == 0 {
+            newTip = rootPin.position
+        } else {
+            newTip = tipPin.position
+        }
+        return updateDeployment(
+            tipPosition: newTip,
+            tipOrientation: tipPin.orientation,
+            activeLength: newLength
+        )
+    }
+
+    private mutating func setActiveLengthUnchecked(_ length: Double) {
+        let previousCount = nodes.count
+        activeLength = length
+        let desiredCount = desiredNodeCount(for: length, currentCount: previousCount)
+        reconcileTopology(from: previousCount, to: desiredCount)
+        rebuildConstraints()
+        projectPins()
     }
 
     @discardableResult
@@ -147,14 +262,25 @@ public struct HoseRod: Sendable {
         iterations requestedIterations: Int? = nil
     ) -> Bool {
         let iterations = requestedIterations ?? configuration.solverIterations
-        guard deltaTime.isFinite, deltaTime > 0, deltaTime <= 0.1,
-              iterations > 0, iterations <= 256
-        else { return false }
+        guard deltaTime.isFinite, deltaTime > 0, deltaTime <= 0.1 else {
+            lastFailure = .invalidTimeStep
+            return false
+        }
+        guard iterations > 0, iterations <= 256 else {
+            lastFailure = .invalidIterationCount
+            return false
+        }
+        let span = simd_distance(rootPin.position, tipPin.position)
+        guard span <= activeLength + 1e-9 else {
+            lastFailure = .infeasibleSpan(span: span, availableLength: activeLength)
+            return false
+        }
 
         let rollbackNodes = nodes
         let rollbackStretch = stretchConstraints
         let rollbackBend = bendConstraints
         let rollbackOrientationLambdas = orientationLambdas
+        let rollbackAngularContinuity = angularContinuityConstraints
 
         integrateFreeNodes()
         projectPins()
@@ -164,7 +290,7 @@ public struct HoseRod: Sendable {
         for index in bendConstraints.indices {
             bendConstraints[index].resetLambda()
         }
-        orientationLambdas = Array(repeating: 0, count: nodes.count)
+        orientationLambdas = Array(repeating: .zero, count: nodes.count)
 
         let maximumCorrection = configuration.maximumStepDisplacement
         for _ in 0..<iterations {
@@ -207,15 +333,37 @@ public struct HoseRod: Sendable {
             stretchConstraints = rollbackStretch
             bendConstraints = rollbackBend
             orientationLambdas = rollbackOrientationLambdas
+            angularContinuityConstraints = rollbackAngularContinuity
+            lastFailure = .nonFiniteState
             return false
         }
+        let allowedStrain = 0.08
+        let strain = maximumSegmentStrain
+        guard strain <= allowedStrain else {
+            lastFailure = .strainLimitExceeded(maximum: strain, allowed: allowedStrain)
+            return false
+        }
+        lastFailure = nil
         return true
     }
 
-    private func desiredNodeCount(for length: Double) -> Int {
+    private func desiredNodeCount(for length: Double, currentCount: Int) -> Int {
         guard length > 0 else { return 2 }
         let segments = Int(ceil(length / configuration.naturalSegmentLength))
-        return min(configuration.maximumNodeCount, max(2, segments + 1))
+        let ideal = min(configuration.maximumNodeCount, max(2, segments + 1))
+        let hysteresis = min(0.5, configuration.naturalSegmentLength * 0.02)
+        if ideal > currentCount {
+            let boundary = Double(currentCount - 1) * configuration.naturalSegmentLength
+            if length <= boundary + hysteresis {
+                return currentCount
+            }
+        } else if ideal < currentCount, currentCount > 2 {
+            let boundary = Double(currentCount - 2) * configuration.naturalSegmentLength
+            if length >= boundary - hysteresis {
+                return currentCount
+            }
+        }
+        return ideal
     }
 
     private mutating func reconcileTopology(from oldCount: Int, to newCount: Int) {
@@ -223,19 +371,15 @@ public struct HoseRod: Sendable {
 
         if newCount > oldCount {
             let amount = newCount - oldCount
-            var inserted: [HoseNode] = []
-            inserted.reserveCapacity(amount)
-
-            if oldCount == 2 {
-                let points = restCurvePoints(count: newCount)
-                for index in 1..<(newCount - 1) {
-                    inserted.append(makeNode(position: points[index]))
-                }
-            } else {
-                let points = restCurvePoints(count: newCount)
-                for index in 1...amount {
-                    inserted.append(makeNode(position: points[index]))
-                }
+            let survivor = nodes[1].position
+            let bridgeLengths = Array(restSegmentLengths(for: newCount).prefix(amount + 1))
+            let bridge = naturalBridgePoints(
+                from: rootPin.position,
+                to: survivor,
+                segmentLengths: bridgeLengths
+            )
+            let inserted = (1...amount).map { index in
+                makeNode(position: bridge[index])
             }
             nodes.insert(contentsOf: inserted, at: 1)
         } else {
@@ -244,7 +388,84 @@ public struct HoseRod: Sendable {
         }
 
         normalizeEndpointMasses()
-        orientationLambdas = Array(repeating: 0, count: nodes.count)
+        orientationLambdas = Array(repeating: .zero, count: nodes.count)
+        angularContinuityConstraints = []
+    }
+
+    /// Builds a deterministic slack bridge while keeping both existing material
+    /// endpoints fixed. FABRIK makes each newly revealed bay natural at the exact
+    /// instant it leaves the reservoir, so a node-count crossing cannot pop.
+    private func naturalBridgePoints(
+        from start: SIMD3<Double>,
+        to end: SIMD3<Double>,
+        segmentLengths: [Double]
+    ) -> [SIMD3<Double>] {
+        guard !segmentLengths.isEmpty else { return [start] }
+        let totalLength = segmentLengths.reduce(0, +)
+        let endpointDelta = end - start
+        let endpointDistance = simd_length(endpointDelta)
+        guard totalLength > 1e-12 else {
+            return [start] + Array(repeating: end, count: segmentLengths.count)
+        }
+
+        let forward: SIMD3<Double>
+        if endpointDistance > 1e-10 {
+            forward = endpointDelta / endpointDistance
+        } else {
+            let pinnedForward = rootPin.orientation.act(SIMD3<Double>(1, 0, 0))
+            forward = simd_length(pinnedForward) > 1e-10
+                ? simd_normalize(pinnedForward)
+                : SIMD3<Double>(1, 0, 0)
+        }
+        let fallback = abs(forward.z) < 0.8
+            ? SIMD3<Double>(0, 0, 1)
+            : SIMD3<Double>(0, 1, 0)
+        let lateral = simd_normalize(simd_cross(fallback, forward))
+        let slack = max(0, totalLength - endpointDistance)
+
+        var points: [SIMD3<Double>] = [start]
+        points.reserveCapacity(segmentLengths.count + 1)
+        var cumulative = 0.0
+        for index in 1..<segmentLengths.count {
+            cumulative += segmentLengths[index - 1]
+            let materialFraction = cumulative / totalLength
+            let linePoint = start + endpointDelta * materialFraction
+            let phase = Double(index) * 1.618_033_988_75 + Double(seed & 0xFF) * 0.013
+            let envelope = sin(.pi * materialFraction)
+            let signedAmplitude = max(1, slack * 0.32) * envelope *
+                (index.isMultiple(of: 2) ? 1 : -1) * (0.82 + 0.18 * sin(phase))
+            points.append(linePoint + lateral * signedAmplitude)
+        }
+        points.append(end)
+
+        func deterministicDirection(_ index: Int) -> SIMD3<Double> {
+            let sign = index.isMultiple(of: 2) ? 1.0 : -1.0
+            return simd_normalize(forward + lateral * (0.35 * sign))
+        }
+
+        for _ in 0..<512 {
+            points[points.count - 1] = end
+            for index in stride(from: segmentLengths.count - 1, through: 0, by: -1) {
+                let delta = points[index] - points[index + 1]
+                let direction = simd_length(delta) > 1e-12
+                    ? delta / simd_length(delta)
+                    : -deterministicDirection(index)
+                points[index] = points[index + 1] + direction * segmentLengths[index]
+            }
+
+            points[0] = start
+            for index in segmentLengths.indices {
+                let delta = points[index + 1] - points[index]
+                let direction = simd_length(delta) > 1e-12
+                    ? delta / simd_length(delta)
+                    : deterministicDirection(index)
+                points[index + 1] = points[index] + direction * segmentLengths[index]
+            }
+            if simd_distance(points.last!, end) < 1e-9 { break }
+        }
+        points[0] = start
+        points[points.count - 1] = end
+        return points
     }
 
     private mutating func makeNode(position: SIMD3<Double>) -> HoseNode {
@@ -366,7 +587,8 @@ public struct HoseRod: Sendable {
                 )
             }
         }
-        orientationLambdas = Array(repeating: 0, count: nodes.count)
+        orientationLambdas = Array(repeating: .zero, count: nodes.count)
+        angularContinuityConstraints = []
     }
 
     private mutating func integrateFreeNodes() {
@@ -388,31 +610,208 @@ public struct HoseRod: Sendable {
             projectPins()
             return
         }
-        for _ in 0..<max(2, iterations / 3) {
+        let targets = transportedMaterialFrames()
+        orientationLambdas = Array(repeating: .zero, count: nodes.count)
+        angularContinuityConstraints = (0..<(nodes.count - 1)).map { index in
+            XPBDAngularContinuityConstraint(
+                firstIndex: index,
+                secondIndex: index + 1,
+                restRelativeOrientation: normalizedQuaternion(
+                    targets[index + 1] * targets[index].inverse
+                ),
+                compliance: configuration.orientationCompliance
+            )
+        }
+
+        let angularIterations = max(4, iterations / 2)
+        for _ in 0..<angularIterations {
+            for index in angularContinuityConstraints.indices {
+                angularContinuityConstraints[index].solve(
+                    nodes: &nodes,
+                    deltaTime: deltaTime,
+                    maximumCorrection: 0.24
+                )
+            }
             for index in 1..<(nodes.count - 1) {
-                let tangent = nodes[index + 1].position - nodes[index - 1].position
-                guard simd_length(tangent) > 1e-10 else { continue }
-                let target = orientationFromForward(tangent)
-                XPBDOrientationConstraint.solve(
+                XPBDVectorAngularConstraint.solveTarget(
                     orientation: &nodes[index].orientation,
-                    target: target,
+                    target: targets[index],
                     inverseMass: nodes[index].inverseMass,
                     compliance: configuration.orientationCompliance,
                     deltaTime: deltaTime,
-                    lambda: &orientationLambdas[index]
+                    lambda: &orientationLambdas[index],
+                    maximumCorrection: 0.30
                 )
-                // q and -q encode the same rotation. Keep a single sign branch so
-                // downstream joint interpolation cannot take a 360-degree detour.
-                if simd_dot(
-                    nodes[index - 1].orientation.vector,
-                    nodes[index].orientation.vector
-                ) < 0 {
-                    nodes[index].orientation = simd_quatd(
-                        vector: -nodes[index].orientation.vector
-                    )
-                }
+            }
+            projectPins()
+        }
+
+        for index in 1..<(nodes.count - 1) {
+            nodes[index].orientation = hemisphereSlerp(
+                nodes[index].orientation,
+                targets[index],
+                fraction: 0.98
+            )
+            if simd_dot(
+                nodes[index - 1].orientation.vector,
+                nodes[index].orientation.vector
+            ) < 0 {
+                nodes[index].orientation = simd_quatd(
+                    vector: -nodes[index].orientation.vector
+                )
             }
         }
+        projectPins()
+    }
+
+    /// Builds a Bishop (parallel-transport) frame field and distributes the
+    /// nozzle's explicit swivel as local-X twist. Arbitrary endpoint swing stays
+    /// confined to the hard-pinned nozzle instead of rolling the entire hose.
+    private func transportedMaterialFrames() -> [simd_quatd] {
+        guard nodes.count >= 2 else { return nodes.map(\.orientation) }
+        var tangents: [SIMD3<Double>] = []
+        tangents.reserveCapacity(nodes.count)
+        for index in nodes.indices {
+            let delta: SIMD3<Double>
+            if index == 0 {
+                delta = nodes[1].position - nodes[0].position
+            } else if index == nodes.count - 1 {
+                delta = nodes[index].position - nodes[index - 1].position
+            } else {
+                delta = nodes[index + 1].position - nodes[index - 1].position
+            }
+            if vectorIsFinite(delta), simd_length(delta) > 1e-10 {
+                tangents.append(simd_normalize(delta))
+            } else if let previous = tangents.last {
+                tangents.append(previous)
+            } else {
+                tangents.append(rootPin.orientation.act(SIMD3<Double>(1, 0, 0)))
+            }
+        }
+
+        var transported = Array(repeating: simd_quatd.identity, count: nodes.count)
+        transported[0] = rootPin.orientation
+        var previousDirection = rootPin.orientation.act(SIMD3<Double>(1, 0, 0))
+        if simd_length(previousDirection) < 1e-10 {
+            previousDirection = tangents[0]
+        } else {
+            previousDirection = simd_normalize(previousDirection)
+        }
+        for index in 1..<nodes.count {
+            let previousFrame = transported[index - 1]
+            let rotation = minimalRotation(
+                from: previousDirection,
+                to: tangents[index],
+                preferredAxis: previousFrame.act(SIMD3<Double>(0, 1, 0))
+            )
+            transported[index] = normalizedQuaternion(rotation * previousFrame)
+            previousDirection = tangents[index]
+        }
+
+        let localDifference = normalizedQuaternion(
+            transported.last!.inverse * tipPin.orientation
+        )
+        let localTwistCandidate = simd_quatd(
+            ix: localDifference.imag.x,
+            iy: 0,
+            iz: 0,
+            r: localDifference.real
+        )
+        let localTwist = safeNormalizedQuaternion(localTwistCandidate) ?? .identity
+        let lengths = restSegmentLengths()
+        var cumulative = 0.0
+        var targets = transported
+        for index in 1..<(nodes.count - 1) {
+            cumulative += lengths[index - 1]
+            let fraction = activeLength > 1e-9
+                ? min(max(cumulative / activeLength, 0), 1)
+                : Double(index) / Double(nodes.count - 1)
+            targets[index] = normalizedQuaternion(
+                transported[index] * hemisphereSlerp(
+                    .identity,
+                    localTwist,
+                    fraction: fraction
+                )
+            )
+        }
+        targets[0] = rootPin.orientation
+        targets[nodes.count - 1] = tipPin.orientation
+        targets = boundedFrameField(
+            targets,
+            tangents: tangents,
+            maximumAdjacentAngle: 0.26
+        )
+        for index in 1..<(targets.count - 1) where
+            simd_dot(targets[index - 1].vector, targets[index].vector) < 0 {
+            targets[index] = simd_quatd(vector: -targets[index].vector)
+        }
+        return targets
+    }
+
+    private func boundedFrameField(
+        _ input: [simd_quatd],
+        tangents: [SIMD3<Double>],
+        maximumAdjacentAngle: Double
+    ) -> [simd_quatd] {
+        guard input.count > 2 else { return input }
+        var frames = input
+        let last = frames.count - 1
+        let tipForward = tipPin.orientation.act(SIMD3<Double>(1, 0, 0))
+        let tipTracksCenterline = simd_dot(
+            simd_normalize(tipForward),
+            simd_normalize(tangents[last])
+        ) > 0.95
+
+        func bounded(
+            from anchor: simd_quatd,
+            toward candidate: simd_quatd
+        ) -> simd_quatd {
+            let dot = abs(simd_dot(anchor.vector, candidate.vector))
+            let angle = 2 * acos(max(-1, min(1, dot)))
+            guard angle > maximumAdjacentAngle else { return candidate }
+            return hemisphereSlerp(
+                anchor,
+                candidate,
+                fraction: maximumAdjacentAngle / angle
+            )
+        }
+
+        // Alternating forward/backward projections solve the bounded-rotation
+        // chain while retaining exact endpoint frames whenever the nozzle's
+        // forward axis agrees with the final centerline tangent.
+        let projectionPasses = tipTracksCenterline ? 32 : 1
+        for _ in 0..<projectionPasses {
+            frames[0] = rootPin.orientation
+            for index in 1..<last {
+                frames[index] = bounded(
+                    from: frames[index - 1],
+                    toward: frames[index]
+                )
+            }
+            guard tipTracksCenterline else { continue }
+            frames[last] = tipPin.orientation
+            for index in stride(from: last - 1, through: 1, by: -1) {
+                frames[index] = bounded(
+                    from: frames[index + 1],
+                    toward: frames[index]
+                )
+            }
+        }
+        frames[0] = rootPin.orientation
+        frames[last] = tipPin.orientation
+        if !tipTracksCenterline {
+            let candidate = frames[last - 1]
+            let dot = abs(simd_dot(frames[last].vector, candidate.vector))
+            let angle = 2 * acos(max(-1, min(1, dot)))
+            if angle > 1.0 {
+                frames[last - 1] = hemisphereSlerp(
+                    frames[last],
+                    candidate,
+                    fraction: 1.0 / angle
+                )
+            }
+        }
+        return frames
     }
 
     private mutating func stabilizeVerletHistory(relativeTo oldNodes: [HoseNode]) {

@@ -4,11 +4,13 @@ public enum HoseConfigurationError: Error, Equatable, Sendable {
     case invalidMaximumNodeCount
     case invalidNaturalSegmentLength
     case invalidMaximumActiveLength
+    case maximumActiveLengthShorterThanOneSegment
     case activeLengthExceedsTopology
     case invalidCompliance
     case invalidDamping
     case invalidSolverIterations
     case invalidMaximumStepDisplacement
+    case invalidRequiredDisplayDiagonal
 }
 
 public struct HoseConfiguration: Equatable, Sendable {
@@ -42,6 +44,9 @@ public struct HoseConfiguration: Equatable, Sendable {
         guard maximumActiveLength.isFinite, maximumActiveLength > 0 else {
             throw HoseConfigurationError.invalidMaximumActiveLength
         }
+        guard maximumActiveLength >= naturalSegmentLength else {
+            throw HoseConfigurationError.maximumActiveLengthShorterThanOneSegment
+        }
         guard maximumActiveLength <= naturalSegmentLength * Double(maximumNodeCount - 1) else {
             throw HoseConfigurationError.activeLengthExceedsTopology
         }
@@ -71,12 +76,22 @@ public struct HoseConfiguration: Equatable, Sendable {
     }
 
     public static let voiceVAC: HoseConfiguration = {
-        // 71 deployable 32 pt bays provide 2,272 pt of exposed material.
-        // That clears a large desktop diagonal while retaining the 72-node cap.
-        try! HoseConfiguration(
+        try! voiceVAC(requiredDisplayDiagonal: 2_200)
+    }()
+
+    public static func voiceVAC(
+        requiredDisplayDiagonal: Double
+    ) throws -> HoseConfiguration {
+        guard requiredDisplayDiagonal.isFinite, requiredDisplayDiagonal > 0 else {
+            throw HoseConfigurationError.invalidRequiredDisplayDiagonal
+        }
+        let requiredReach = max(2_200, requiredDisplayDiagonal * 1.08)
+        let maximumNodeCount = 72
+        let naturalSegmentLength = requiredReach / Double(maximumNodeCount - 1)
+        return try HoseConfiguration(
             maximumNodeCount: 72,
-            naturalSegmentLength: 32,
-            maximumActiveLength: 2_272,
+            naturalSegmentLength: naturalSegmentLength,
+            maximumActiveLength: requiredReach,
             stretchCompliance: 2e-8,
             bendCompliance: 2e-5,
             orientationCompliance: 1e-7,
@@ -84,5 +99,5 @@ public struct HoseConfiguration: Equatable, Sendable {
             solverIterations: 20,
             maximumStepDisplacement: 160
         )
-    }()
+    }
 }

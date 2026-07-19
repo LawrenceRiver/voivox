@@ -189,6 +189,7 @@ struct HoseRodTests {
             "maxStrain=\(maximumObservedStrain)"
         )
         #expect(finite)
+        #expect(maximumObservedStrain < 0.08)
         #expect(rod.activeNodeCount <= 72)
         #expect(rod.maximumDistanceFromRoot < 3_200)
         #expect(rod.maximumSegmentStrain < 0.08)
@@ -210,7 +211,14 @@ struct HoseRodTests {
         for target in targets {
             expectSuccess(rod.pinTip(target, orientation: .identity))
             for _ in 0..<18 {
-                expectSuccess(rod.step(deltaTime: step, iterations: 24))
+                let succeeded = rod.step(deltaTime: step, iterations: 24)
+                #expect(succeeded || rod.lastFailure != nil)
+                if succeeded {
+                    #expect(rod.maximumSegmentStrain < 0.08)
+                }
+                let transientIsFinite = rod.snapshot.joints.allSatisfy { $0.isFinite }
+                #expect(transientIsFinite)
+                #expect(rod.maximumDistanceFromRoot < 4_000)
             }
             let allJointsAreFinite = rod.snapshot.joints.allSatisfy { $0.isFinite }
             #expect(allJointsAreFinite)
@@ -241,7 +249,7 @@ struct HoseRodTests {
             #expect(rod.activeLength <= previousLength)
             #expect(rod.activeLength >= 0)
             #expect(rod.activeNodeCount <= previousCount)
-            for joint in after.joints.dropFirst() {
+            for joint in after.joints.dropFirst().dropLast() {
                 if let previous = beforeByMaterial[joint.materialID] {
                     #expect(joint.position == previous)
                 }
@@ -305,6 +313,289 @@ struct HoseRodTests {
         }
     }
 
+    @Test("configuration rejects a maximum active length shorter than one bay")
+    func configurationMinimumReach() {
+        #expect(throws: HoseConfigurationError.self) {
+            try HoseConfiguration(
+                maximumNodeCount: 72,
+                naturalSegmentLength: 40,
+                maximumActiveLength: 39,
+                stretchCompliance: 0,
+                bendCompliance: 1e-5,
+                orientationCompliance: 1e-6,
+                damping: 0.9,
+                solverIterations: 12,
+                maximumStepDisplacement: 160
+            )
+        }
+    }
+
+    @Test("Voice VAC reach derives from display diagonal with 8 percent reserve")
+    func dynamicVoiceVACReach() throws {
+        let compatibility = HoseConfiguration.voiceVAC
+        let wideDisplay = try HoseConfiguration.voiceVAC(requiredDisplayDiagonal: 3_000)
+
+        #expect(compatibility.maximumActiveLength >= 2_376)
+        #expect(wideDisplay.maximumActiveLength >= 3_240)
+        #expect(wideDisplay.maximumNodeCount == 72)
+        #expect(
+            abs(
+                wideDisplay.naturalSegmentLength *
+                    Double(wideDisplay.maximumNodeCount - 1) -
+                    wideDisplay.maximumActiveLength
+            ) < 1e-9
+        )
+        #expect(compatibility.stretchCompliance < compatibility.orientationCompliance)
+        #expect(compatibility.orientationCompliance < compatibility.bendCompliance)
+    }
+
+    @Test("atomic deployment rejects an infeasible span without partial mutation")
+    func atomicDeploymentFeasibility() {
+        var rod = HoseRod(configuration: .voiceVAC, seed: 22)
+        let before = rod.snapshot
+
+        let rejected = rod.updateDeployment(
+            tipPosition: SIMD3(900, 0, 0),
+            tipOrientation: .identity,
+            activeLength: 500
+        )
+        guard case let .failure(.infeasibleSpan(span, availableLength)) = rejected else {
+            Issue.record("Expected an infeasible-span result")
+            return
+        }
+        #expect(span == 900)
+        #expect(availableLength == 500)
+        #expect(rod.snapshot == before)
+
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: SIMD3(820, 120, 0),
+                tipOrientation: .identity,
+                activeLength: 940
+            )
+        )
+        #expect(rod.activeLength == 940)
+        #expect(rod.snapshot.joints.last?.position == SIMD3(820, 120, 0))
+    }
+
+    @Test("pending legacy pins fail observably when their span exceeds material")
+    func legacyPendingInfeasibility() {
+        var rod = HoseRod(configuration: .voiceVAC, seed: 33)
+        expectSuccess(rod.pinRoot(.zero, orientation: .identity))
+        expectSuccess(rod.pinTip(SIMD3(1_200, 0, 0), orientation: .identity))
+        expectSuccess(rod.setActiveLength(500))
+
+        expectFailure(rod.step(deltaTime: step, iterations: 20))
+        guard case let .infeasibleSpan(span, availableLength) = rod.lastFailure else {
+            Issue.record("Expected typed infeasible-span failure")
+            return
+        }
+        #expect(span == 1_200)
+        #expect(availableLength == 500)
+        #expect(rod.maximumSegmentStrain > 0.08)
+    }
+
+    @Test("retraction moves the tip atomically once slack is exhausted")
+    func feasibleAtomicRetraction() {
+        var rod = HoseRod(configuration: .voiceVAC, seed: 44)
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: SIMD3(700, 0, 0),
+                tipOrientation: .identity,
+                activeLength: 800
+            )
+        )
+
+        expectDeploymentSuccess(rod.retract(by: 250))
+        #expect(rod.activeLength == 550)
+        #expect(simd_distance(rod.snapshot.joints.first!.position, rod.snapshot.joints.last!.position) <= 550)
+        #expect(rod.lastFailure == nil)
+    }
+
+    @Test("reservoir topology crossings preserve survivors and natural edge strain")
+    func topologyCrossingHasNoPop() {
+        var rod = HoseRod(configuration: .voiceVAC, seed: 66)
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: SIMD3(420, 0, 0),
+                tipOrientation: .identity,
+                activeLength: 500
+            )
+        )
+        for _ in 0..<120 {
+            expectSuccess(rod.step(deltaTime: step, iterations: 20))
+        }
+
+        for targetLength in [532.0, 700.0] {
+            let before = Dictionary(
+                uniqueKeysWithValues: rod.snapshot.joints.map { ($0.materialID, $0.position) }
+            )
+            expectDeploymentSuccess(
+                rod.updateDeployment(
+                    tipPosition: SIMD3(420, 0, 0),
+                    tipOrientation: .identity,
+                    activeLength: targetLength
+                )
+            )
+
+            #expect(rod.maximumSegmentStrain < 0.08)
+            for joint in rod.snapshot.joints.dropFirst().dropLast() {
+                if let previous = before[joint.materialID] {
+                    #expect(simd_distance(joint.position, previous) < 1e-9)
+                }
+            }
+        }
+    }
+
+    @Test("topology hysteresis prevents node churn around a bay boundary")
+    func topologyBoundaryHysteresis() {
+        var rod = HoseRod(configuration: .voiceVAC, seed: 77)
+        let boundary = rod.configuration.naturalSegmentLength * 15
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: SIMD3(boundary * 0.8, 0, 0),
+                tipOrientation: .identity,
+                activeLength: boundary - 0.2
+            )
+        )
+        let stableCount = rod.activeNodeCount
+
+        for length in [boundary + 0.2, boundary - 0.2, boundary + 0.1, boundary - 0.1] {
+            expectDeploymentSuccess(
+                rod.updateDeployment(
+                    tipPosition: SIMD3(boundary * 0.8, 0, 0),
+                    tipOrientation: .identity,
+                    activeLength: length
+                )
+            )
+            #expect(rod.activeNodeCount == stableCount)
+        }
+    }
+
+    @Test("parallel-transport frames cross negative X without quaternion flips")
+    func framesCrossNegativeXContinuously() {
+        var rod = HoseRod(configuration: .voiceVAC, seed: 99)
+        var previousByMaterial: [UInt64: simd_quatd] = [:]
+        let angles = stride(from: 0.75 * Double.pi, through: 1.25 * .pi, by: .pi / 48)
+
+        for angle in angles {
+            let direction = SIMD3<Double>(cos(angle), sin(angle), 0)
+            let tip = direction * 720
+            expectDeploymentSuccess(
+                rod.updateDeployment(
+                    tipPosition: tip,
+                    tipOrientation: testFrame(forward: direction, roll: 0),
+                    activeLength: 900
+                )
+            )
+            expectSuccess(rod.step(deltaTime: step, iterations: 24))
+            let joints = rod.snapshot.joints
+
+            for joint in joints.dropFirst().dropLast() {
+                #expect(abs(simd_length(joint.orientation.vector) - 1) < 1e-10)
+                if let previous = previousByMaterial[joint.materialID] {
+                    #expect(quaternionGeodesic(previous, joint.orientation) < 1.10)
+                }
+                previousByMaterial[joint.materialID] = joint.orientation
+            }
+            for pair in zip(joints.dropFirst(), joints.dropFirst(2)) {
+                #expect(quaternionGeodesic(pair.0.orientation, pair.1.orientation) < 1.10)
+            }
+        }
+    }
+
+    @Test("tip roll is distributed smoothly while endpoint frames remain exact")
+    func controlledTipRoll() {
+        var rod = HoseRod(configuration: .voiceVAC, seed: 111)
+        let tipOrientation = testFrame(
+            forward: SIMD3(1, 0, 0),
+            roll: .pi / 2
+        )
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: SIMD3(720, 0, 0),
+                tipOrientation: tipOrientation,
+                activeLength: 800
+            )
+        )
+        for _ in 0..<240 {
+            expectSuccess(rod.step(deltaTime: step, iterations: 24))
+        }
+
+        let joints = rod.snapshot.joints
+        #expect(quaternionGeodesic(joints.first!.orientation, .identity) < 1e-12)
+        #expect(quaternionGeodesic(joints.last!.orientation, tipOrientation) < 1e-12)
+        var previousRoll = -Double.infinity
+        for joint in joints {
+            let yAxis = joint.orientation.act(SIMD3<Double>(0, 1, 0))
+            let roll = atan2(yAxis.z, yAxis.y)
+            #expect(roll + 0.05 >= previousRoll)
+            previousRoll = roll
+        }
+        for pair in zip(joints, joints.dropFirst()) {
+            #expect(quaternionGeodesic(pair.0.orientation, pair.1.orientation) < 0.30)
+        }
+    }
+
+    @Test("snapshot maps deterministically to exactly 64 rig joints")
+    func fixedRigMapping() {
+        var rod = HoseRod(configuration: .voiceVAC, seed: 123)
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: SIMD3(640, 80, 0),
+                tipOrientation: testFrame(forward: SIMD3(8, 1, 0), roll: 0.4),
+                activeLength: 760
+            )
+        )
+        for _ in 0..<120 {
+            expectSuccess(rod.step(deltaTime: step, iterations: 20))
+        }
+
+        let first = rod.snapshot.fixedRigSnapshot()
+        let second = rod.snapshot.fixedRigSnapshot()
+        #expect(first == second)
+        #expect(first.joints.count == 64)
+        #expect(first.joints.map(\.rigIndex) == Array(0..<64))
+        #expect(first.joints.first?.normalizedMaterialCoordinate == 0)
+        #expect(first.joints.last?.normalizedMaterialCoordinate == 1)
+        #expect(first.joints.first?.position == rod.snapshot.joints.first?.position)
+        #expect(first.joints.last?.position == rod.snapshot.joints.last?.position)
+        #expect(first.joints.contains { $0.activity == .inactiveReservoir })
+        #expect(first.joints.contains { $0.activity == .active })
+        for pair in zip(first.joints, first.joints.dropFirst()) {
+            #expect(simd_dot(pair.0.orientation.vector, pair.1.orientation.vector) >= 0)
+        }
+    }
+
+    @Test("rig interpolation hemisphere-corrects equivalent quaternion signs")
+    func rigQuaternionHemisphereCorrection() {
+        let identity = simd_quatd.identity
+        let snapshot = HoseSnapshot(
+            activeLength: 100,
+            maximumActiveLength: 100,
+            joints: [
+                HoseJointSample(
+                    jointIndex: 0,
+                    materialID: 0,
+                    normalizedMaterialCoordinate: 0,
+                    position: .zero,
+                    orientation: identity
+                ),
+                HoseJointSample(
+                    jointIndex: 1,
+                    materialID: 1,
+                    normalizedMaterialCoordinate: 1,
+                    position: SIMD3(100, 0, 0),
+                    orientation: simd_quatd(vector: -identity.vector)
+                )
+            ]
+        )
+
+        let rig = snapshot.fixedRigSnapshot()
+        #expect(rig.joints.count == 64)
+        #expect(rig.joints.allSatisfy { quaternionGeodesic($0.orientation, identity) < 1e-12 })
+    }
+
     @Test("invalid timesteps pins and lengths are rejected or clamped deliberately")
     func invalidRuntimeInputs() {
         var rod = HoseRod(configuration: .voiceVAC, seed: 3)
@@ -351,4 +642,28 @@ private func expectSuccess(_ result: Bool) {
 
 private func expectFailure(_ result: Bool) {
     #expect(!result)
+}
+
+private func expectDeploymentSuccess(
+    _ result: Result<Void, HoseSimulationFailure>
+) {
+    guard case .success = result else {
+        Issue.record("Expected deployment update to succeed, got \(result)")
+        return
+    }
+}
+
+private func quaternionGeodesic(_ lhs: simd_quatd, _ rhs: simd_quatd) -> Double {
+    let dot = abs(simd_dot(lhs.vector, rhs.vector))
+    return 2 * acos(max(-1, min(1, dot)))
+}
+
+private func testFrame(
+    forward: SIMD3<Double>,
+    roll: Double
+) -> simd_quatd {
+    let normalizedForward = simd_normalize(forward)
+    let align = simd_quatd(from: SIMD3<Double>(1, 0, 0), to: normalizedForward)
+    let swivel = simd_quatd(angle: roll, axis: normalizedForward)
+    return simd_normalize(swivel * align)
 }
