@@ -8,6 +8,7 @@ import {
   VOIVOX_EXTENSION_ORIGIN,
   type VoivoxLoopbackServer
 } from '../src/loopback-server.js';
+import { VoiceVacError } from '../src/voice-vac-error.js';
 
 describe('Voice Vac loopback API', () => {
   let server: VoivoxLoopbackServer | undefined;
@@ -601,6 +602,79 @@ describe('Voice Vac loopback API', () => {
     expect(await response.json()).toEqual({
       error: 'Voice Vac JSON request body is too large.'
     });
+  });
+
+  it('returns a typed operational failure without exposing its cause', async () => {
+    server = await createVoivoxLoopbackServer({
+      token: 'desktop-only-token',
+      onActiveVideoTranscription: async () => {
+        throw new VoiceVacError(
+          'TARGET_NAVIGATED',
+          'The armed video navigated. Arm the current page again.',
+          true,
+          409,
+          Object.assign(new Error('private target URL'), { stderr: 'secret worker output' })
+        );
+      }
+    });
+
+    const response = await fetch(`${server.baseUrl}/v1/transcriptions/active-video`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer desktop-only-token',
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        language: 'auto',
+        mode: 'auto',
+        output_format: 'text',
+        timestamps: false
+      })
+    });
+
+    expect(response.status).toBe(409);
+    const body = await response.json();
+    expect(body).toEqual({
+      code: 'TARGET_NAVIGATED',
+      error: 'The armed page navigated. Arm the current page again.',
+      retryable: true
+    });
+    expect(JSON.stringify(body)).not.toMatch(/private target|stderr|worker output/iu);
+  });
+
+  it('redacts unknown exceptions behind a generic typed 500', async () => {
+    server = await createVoivoxLoopbackServer({
+      token: 'desktop-only-token',
+      onActiveVideoTranscription: async () => {
+        throw Object.assign(new Error('Bearer private-token'), {
+          stderr: '/Users/private/model stderr',
+          stdout: 'secret protocol frame'
+        });
+      }
+    });
+
+    const response = await fetch(`${server.baseUrl}/v1/transcriptions/active-video`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer desktop-only-token',
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        language: 'auto',
+        mode: 'auto',
+        output_format: 'text',
+        timestamps: false
+      })
+    });
+
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body).toEqual({
+      code: 'INTERNAL_ERROR',
+      error: 'Voice VAC could not complete the request.',
+      retryable: false
+    });
+    expect(JSON.stringify(body)).not.toMatch(/private|stderr|stdout|protocol|Bearer/iu);
   });
 });
 

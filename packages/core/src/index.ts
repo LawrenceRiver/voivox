@@ -6,3 +6,4 @@ export * from './pvtt-contract.js';
 export * from './pvtt-state.js';
 export * from './session-store.js';
 export * from './voivox-service.js';
+export * from './voice-vac-error.js';

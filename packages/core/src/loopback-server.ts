@@ -11,6 +11,7 @@ import {
   type CrossWindowSessionPatch
 } from './cross-window-session.js';
 import type { TranscriptResult } from './pvtt-contract.js';
+import { serializeVoiceVacError } from './voice-vac-error.js';
 
 export const VOIVOX_EXTENSION_ORIGIN = 'chrome-extension://pepfpbobjbjehhhcjiokmneclohlffno';
 export const VOIVOX_VERSION = '0.1.1';
@@ -327,9 +328,12 @@ export async function createVoivoxLoopbackServer(options: {
 
       sendJson(response, 404, { error: 'Unknown Voice Vac endpoint.' });
     } catch (error) {
-      sendJson(response, 400, {
-        error: error instanceof Error ? error.message : 'Invalid request.'
-      });
+      if (error instanceof RequestBodyError) {
+        sendJson(response, 400, { error: error.message });
+        return;
+      }
+      const serialized = serializeVoiceVacError(error);
+      sendJson(response, serialized.statusCode, serialized.body);
     }
   });
 
@@ -621,7 +625,7 @@ function formatTime(totalMs: number): string {
 async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
   const declaredLength = Number(request.headers['content-length']);
   if (Number.isFinite(declaredLength) && declaredLength > MAXIMUM_JSON_BODY_BYTES) {
-    throw new Error('Voice Vac JSON request body is too large.');
+    throw new RequestBodyError('Voice Vac JSON request body is too large.');
   }
   let body = '';
   let bodyBytes = 0;
@@ -629,22 +633,29 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
   for await (const chunk of request) {
     bodyBytes += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.byteLength;
     if (bodyBytes > MAXIMUM_JSON_BODY_BYTES) {
-      throw new Error('Voice Vac JSON request body is too large.');
+      throw new RequestBodyError('Voice Vac JSON request body is too large.');
     }
     body += chunk;
   }
 
   if (!body) {
-    throw new Error('A JSON request body is required.');
+    throw new RequestBodyError('A JSON request body is required.');
   }
 
-  const parsed: unknown = JSON.parse(body);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw new RequestBodyError('Request body must contain valid JSON.');
+  }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Request body must be a JSON object.');
+    throw new RequestBodyError('Request body must be a JSON object.');
   }
 
   return parsed as Record<string, unknown>;
 }
+
+class RequestBodyError extends Error {}
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
   response.writeHead(statusCode, { 'content-type': 'application/json; charset=utf-8' });
