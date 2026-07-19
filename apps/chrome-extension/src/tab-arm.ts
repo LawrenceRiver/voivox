@@ -1,3 +1,4 @@
+import { formatDropToken } from './drop-protocol.js';
 import type { TargetSession } from './target-session.js';
 import { TargetSessionStore } from './target-session-store.js';
 
@@ -85,7 +86,7 @@ async function performArmActiveTab(deps: TabArmDependencies): Promise<TargetSess
     url: tab.url,
     title: tab.title?.trim() || 'Chrome video',
     dropNonce: nonce,
-    dropToken: formatArmedDropToken(id, nonce),
+    dropToken: formatDropToken(id, nonce),
     status: 'armed',
     armedAt: now,
     updatedAt: now
@@ -162,10 +163,6 @@ function base64UrlNonce(bytes: Uint8Array): string {
   const nonce = btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '');
   if (!/^[A-Za-z0-9_-]{43}$/u.test(nonce)) throw new Error('Voice VAC arm nonce encoding failed.');
   return nonce;
-}
-
-function formatArmedDropToken(sessionId: string, nonce: string): string {
-  return `VOICE_VAC_DROP_V1|${sessionId}|${nonce}`;
 }
 
 function pageOrigin(url: string): string {
