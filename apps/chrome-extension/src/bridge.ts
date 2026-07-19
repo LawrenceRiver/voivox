@@ -5,7 +5,11 @@ export type BridgeConfig = {
   token: string;
 };
 
-export type CaptureErrorCode = 'transcription-cancelled' | 'transcription-timeout';
+export type CaptureErrorCode =
+  | 'transcription-cancelled'
+  | 'transcription-timeout'
+  | 'TAB_CLOSED'
+  | 'TARGET_NAVIGATED';
 
 export type TunnelPoint = { screenX: number; screenY: number };
 export type TunnelRect = { x: number; y: number; width: number; height: number };
@@ -83,7 +87,10 @@ export function normalizeCaptureState(value: unknown): CaptureState {
 
   if (record.canRetry === true) state.canRetry = true;
   if (typeof record.error === 'string') state.error = record.error;
-  if (record.errorCode === 'transcription-cancelled' || record.errorCode === 'transcription-timeout') {
+  if (record.errorCode === 'transcription-cancelled'
+    || record.errorCode === 'transcription-timeout'
+    || record.errorCode === 'TAB_CLOSED'
+    || record.errorCode === 'TARGET_NAVIGATED') {
     state.errorCode = record.errorCode;
   }
   if (typeof record.progress === 'number' && record.progress >= 0 && record.progress <= 100) {

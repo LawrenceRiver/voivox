@@ -1,6 +1,7 @@
 import { normalizeCaptureState, type CaptureState } from './bridge.js';
 
 const ROOT_ID = 'vacvox-tunnel-root';
+const RUNTIME_MARKER = 'voiceVacContentTunnelRuntimeV1';
 
 export type MountedContentTunnel = {
   host: HTMLElement;
@@ -145,9 +146,13 @@ export function mountContentTunnel(): MountedContentTunnel {
     window.setTimeout(() => { copy.textContent = '复制全文'; }, 1_000);
   });
   close.addEventListener('click', () => mounted.destroy());
-  chrome.storage.onChanged?.addListener((changes, areaName) => {
+  const onStorageChanged = (
+    changes: Record<string, chrome.storage.StorageChange>,
+    areaName: string
+  ): void => {
     if (areaName === 'local' && changes.voivoxCaptureState) update(normalizeCaptureState(changes.voivoxCaptureState.newValue));
-  });
+  };
+  chrome.storage.onChanged?.addListener(onStorageChanged);
 
   const mounted: MountedContentTunnel = {
     host,
@@ -157,6 +162,7 @@ export function mountContentTunnel(): MountedContentTunnel {
       document.removeEventListener('pointerup', onUp);
       window.removeEventListener('resize', drawLink);
       window.removeEventListener('scroll', drawLink, true);
+      chrome.storage.onChanged?.removeListener?.(onStorageChanged);
       if (selectedVideo) {
         selectedVideo.style.outline = selectedVideoOutline;
         selectedVideo.style.removeProperty('outline-offset');
@@ -172,6 +178,24 @@ export function mountContentTunnel(): MountedContentTunnel {
     .then((value: unknown) => update(normalizeCaptureState(value)))
     .catch(() => undefined);
   return mounted;
+}
+
+export function registerContentTunnelRuntime(): void {
+  if (document.documentElement.dataset[RUNTIME_MARKER] === 'true') return;
+  document.documentElement.dataset[RUNTIME_MARKER] = 'true';
+  let mounted: MountedContentTunnel | undefined = mountContentTunnel();
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'target-disconnect') {
+      mounted?.destroy();
+      mounted = undefined;
+      sendResponse({ ok: true });
+      return;
+    }
+    if (message?.type === 'session:armed') {
+      mounted ??= mountContentTunnel();
+      sendResponse({ ok: true });
+    }
+  });
 }
 
 function createLinkOverlay(): {
@@ -261,5 +285,5 @@ function requireElement<T extends Element>(root: Element, selector: string): T {
 }
 
 if (typeof chrome !== 'undefined' && typeof document !== 'undefined') {
-  mountContentTunnel();
+  registerContentTunnelRuntime();
 }

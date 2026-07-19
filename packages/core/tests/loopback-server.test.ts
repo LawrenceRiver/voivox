@@ -129,23 +129,65 @@ describe('Voice Vac loopback API', () => {
     };
     const created = await fetch(`${server.baseUrl}/v1/extension/tunnel-sessions`, {
       method: 'POST', headers: extensionHeaders,
-      body: JSON.stringify({ tabId: 9, title: 'Demo MV', state: 'detecting' })
+      body: JSON.stringify({
+        tabId: 9,
+        frameId: 0,
+        documentId: 'doc-9',
+        dropToken: 'VOICE_VAC_DROP_V1|2b0fe529-4021-4674-b55e-1cf081f947dd|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        title: 'Demo MV',
+        state: 'detecting'
+      })
     });
     expect(created.status).toBe(201);
     const session = await created.json() as { id: string };
     const updated = await fetch(`${server.baseUrl}/v1/tunnel-sessions/${session.id}`, {
       method: 'PATCH', headers: desktopHeaders,
       body: JSON.stringify({
+        errorCode: 'TARGET_NAVIGATED',
         state: 'ready',
         targetRect: { x: 20, y: 30, width: 640, height: 360 },
         pageEndpoint: { screenX: 340, screenY: 76 }
       })
     });
-    expect(await updated.json()).toMatchObject({ id: session.id, state: 'ready', tabId: 9 });
+    expect(await updated.json()).toMatchObject({
+      errorCode: 'TARGET_NAVIGATED',
+      id: session.id,
+      state: 'ready',
+      tabId: 9
+    });
     const listed = await fetch(`${server.baseUrl}/v1/tunnel-sessions`, { headers: desktopHeaders });
     expect(await listed.json()).toMatchObject({ sessions: [{ id: session.id, state: 'ready' }] });
     const deleted = await fetch(`${server.baseUrl}/v1/tunnel-sessions/${session.id}`, { method: 'DELETE', headers: desktopHeaders });
     expect(deleted.status).toBe(204);
+  });
+
+  it('requires fixed Chrome identity on create and rejects identity fields on patch', async () => {
+    server = await createVoivoxLoopbackServer({ token: 'desktop-only-token', extensionToken: 'chrome-bridge-token' });
+    const extensionHeaders = {
+      authorization: 'Bearer chrome-bridge-token',
+      'content-type': 'application/json',
+      origin: VOIVOX_EXTENSION_ORIGIN
+    };
+    const missingIdentity = await fetch(`${server.baseUrl}/v1/extension/tunnel-sessions`, {
+      method: 'POST', headers: extensionHeaders, body: JSON.stringify({ tabId: 9 })
+    });
+    expect(missingIdentity.status).toBe(400);
+
+    const created = await fetch(`${server.baseUrl}/v1/extension/tunnel-sessions`, {
+      method: 'POST', headers: extensionHeaders,
+      body: JSON.stringify({
+        tabId: 9,
+        frameId: 0,
+        documentId: 'doc-9',
+        dropToken: 'VOICE_VAC_DROP_V1|2b0fe529-4021-4674-b55e-1cf081f947dd|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+      })
+    });
+    const session = await created.json() as { id: string };
+    const retarget = await fetch(`${server.baseUrl}/v1/extension/tunnel-sessions/${session.id}`, {
+      method: 'PATCH', headers: extensionHeaders,
+      body: JSON.stringify({ documentId: 'doc-other', frameId: 7, tabId: 99 })
+    });
+    expect(retarget.status).toBe(400);
   });
 
   it('restricts the extension token to completed text imports and refuses Chrome audio routes', async () => {

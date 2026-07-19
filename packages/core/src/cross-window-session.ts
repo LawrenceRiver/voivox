@@ -1,3 +1,5 @@
+import type { VoiceVacErrorCode } from './voice-vac-error.js';
+
 export type CrossWindowState =
   | 'idle'
   | 'dragging'
@@ -23,7 +25,11 @@ export type CrossWindowRect = {
 export type CrossWindowSession = {
   id: string;
   tabId: number;
+  frameId: number;
+  documentId: string;
+  dropToken: string;
   state: CrossWindowState;
+  errorCode?: VoiceVacErrorCode;
   appEndpoint?: CrossWindowPoint;
   pageEndpoint?: CrossWindowPoint;
   targetRect?: CrossWindowRect;
@@ -32,7 +38,15 @@ export type CrossWindowSession = {
   updatedAt: number;
 };
 
-export type CrossWindowSessionPatch = Partial<Omit<CrossWindowSession, 'id' | 'updatedAt'>>;
+export type CrossWindowSessionPatch = Partial<Omit<
+  CrossWindowSession,
+  'id' | 'tabId' | 'frameId' | 'documentId' | 'dropToken' | 'updatedAt'
+>>;
+
+export type CrossWindowSessionInitial = CrossWindowSessionPatch & Pick<
+  CrossWindowSession,
+  'frameId' | 'documentId' | 'dropToken'
+>;
 
 /**
  * In-memory coordination primitive shared by the desktop renderer, extension
@@ -43,14 +57,15 @@ export class CrossWindowSessionStore {
   private readonly sessions = new Map<string, CrossWindowSession>();
   private sequence = 0;
 
-  create(tabId: number, initial: CrossWindowSessionPatch = {}): CrossWindowSession {
+  create(tabId: number, initial: CrossWindowSessionInitial): CrossWindowSession {
     if (!Number.isInteger(tabId) || tabId < 0) throw new Error('A valid Chrome tab id is required');
+    validateChromeIdentity(initial);
     const session: CrossWindowSession = {
       id: createSessionId(++this.sequence),
       tabId,
       state: 'idle',
       updatedAt: Date.now(),
-      ...clonePatch(initial)
+      ...cloneInitial(initial)
     };
     this.sessions.set(session.id, session);
     return cloneSession(session);
@@ -102,11 +117,35 @@ function createSessionId(sequence: number): string {
 
 function clonePatch(patch: CrossWindowSessionPatch): CrossWindowSessionPatch {
   return {
-    ...patch,
+    ...(patch.state !== undefined ? { state: patch.state } : {}),
+    ...(patch.errorCode !== undefined ? { errorCode: patch.errorCode } : {}),
     ...(patch.appEndpoint ? { appEndpoint: { ...patch.appEndpoint } } : {}),
     ...(patch.pageEndpoint ? { pageEndpoint: { ...patch.pageEndpoint } } : {}),
-    ...(patch.targetRect ? { targetRect: { ...patch.targetRect } } : {})
+    ...(patch.targetRect ? { targetRect: { ...patch.targetRect } } : {}),
+    ...(patch.title !== undefined ? { title: patch.title } : {}),
+    ...(patch.url !== undefined ? { url: patch.url } : {})
   };
+}
+
+function cloneInitial(initial: CrossWindowSessionInitial): CrossWindowSessionInitial {
+  return {
+    ...clonePatch(initial),
+    frameId: initial.frameId,
+    documentId: initial.documentId,
+    dropToken: initial.dropToken
+  };
+}
+
+function validateChromeIdentity(initial: CrossWindowSessionInitial): void {
+  if (!Number.isSafeInteger(initial.frameId) || initial.frameId < 0) {
+    throw new Error('A valid Chrome frame id is required');
+  }
+  if (!initial.documentId || initial.documentId.trim() !== initial.documentId) {
+    throw new Error('A valid Chrome document id is required');
+  }
+  if (!/^VOICE_VAC_DROP_V1\|[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\|[A-Za-z0-9_-]{43}$/iu.test(initial.dropToken)) {
+    throw new Error('A valid Voice VAC drop token is required');
+  }
 }
 
 function cloneSession(session: CrossWindowSession): CrossWindowSession {

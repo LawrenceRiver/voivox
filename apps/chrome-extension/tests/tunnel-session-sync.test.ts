@@ -12,6 +12,9 @@ describe('browser tunnel session sync', () => {
     const discovery = { baseUrl: 'http://127.0.0.1:43817', localAsr: 'ready' as const, reachable: true as const, source: 'native-messaging' as const, token: 'bridge-token' };
     const id = await syncTunnelSession({
       discovery,
+      documentId: 'doc-11',
+      dropToken: 'VOICE_VAC_DROP_V1|2b0fe529-4021-4674-b55e-1cf081f947dd|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      frameId: 0,
       pageEndpoint: { screenX: 400, screenY: 88 },
       state: 'ready',
       tabId: 11,
@@ -22,13 +25,40 @@ describe('browser tunnel session sync', () => {
     expect(id).toBe('voice-vac-session-1');
     expect(calls[0]?.input).toBe('http://127.0.0.1:43817/v1/extension/tunnel-sessions');
     expect((calls[0]?.init as RequestInit).method).toBe('POST');
+    expect(JSON.parse(String((calls[0]?.init as RequestInit).body))).toMatchObject({
+      tabId: 11,
+      frameId: 0,
+      documentId: 'doc-11',
+      dropToken: 'VOICE_VAC_DROP_V1|2b0fe529-4021-4674-b55e-1cf081f947dd|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+    });
 
-    await syncTunnelSession({ discovery, sessionId: id, state: 'transcribing', tabId: 11 }, request);
+    await syncTunnelSession({
+      discovery,
+      documentId: 'retargeted',
+      dropToken: 'retargeted',
+      errorCode: 'TARGET_NAVIGATED',
+      frameId: 9,
+      sessionId: id,
+      state: 'transcribing',
+      tabId: 99
+    }, request);
     expect(calls[1]?.input).toContain('/voice-vac-session-1');
     expect((calls[1]?.init as RequestInit).method).toBe('PATCH');
+    const patch = JSON.parse(String((calls[1]?.init as RequestInit).body));
+    expect(patch).toEqual({ errorCode: 'TARGET_NAVIGATED', state: 'transcribing' });
+    expect(patch).not.toHaveProperty('tabId');
+    expect(patch).not.toHaveProperty('frameId');
+    expect(patch).not.toHaveProperty('documentId');
+    expect(patch).not.toHaveProperty('dropToken');
   });
 
   it('remains optional when no native desktop bridge is available', async () => {
-    await expect(syncTunnelSession({ discovery: { reachable: false, source: 'none' }, tabId: 1 })).resolves.toBeUndefined();
+    await expect(syncTunnelSession({
+      discovery: { reachable: false, source: 'none' },
+      tabId: 1,
+      frameId: 0,
+      documentId: 'doc-1',
+      dropToken: 'VOICE_VAC_DROP_V1|2b0fe529-4021-4674-b55e-1cf081f947dd|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+    })).resolves.toBeUndefined();
   });
 });

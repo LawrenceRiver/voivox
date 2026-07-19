@@ -56,7 +56,24 @@ async function initialize(): Promise<void> {
   );
   captureState = initialCaptureState;
   render();
-  void chrome.runtime.sendMessage({ target: 'service-worker', type: 'overlay:show' });
+  try {
+    const armed = await chrome.runtime.sendMessage({
+      target: 'service-worker',
+      type: 'tab:arm'
+    }) as { captureState?: unknown; session?: unknown };
+    captureState = normalizeCaptureState(armed.captureState);
+    render();
+    if (armed.session) window.close();
+  } catch {
+    captureState = {
+      ...captureState,
+      error: locale === 'zh-CN'
+        ? '无法武装当前页面。请重新打开 Voice VAC。'
+        : 'Could not arm this page. Reopen Voice VAC.',
+      phase: 'error'
+    };
+    render();
+  }
 }
 
 chrome.storage.onChanged.addListener((changes, areaName) => {

@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { mountContentTunnel } from '../src/content-tunnel.js';
+import { mountContentTunnel, registerContentTunnelRuntime } from '../src/content-tunnel.js';
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -52,6 +52,28 @@ describe('Voice Vac page tunnel', () => {
       type: 'target:ready',
       url: window.location.href
     }));
+  });
+
+  it('disposes the old document overlay and can remount it for a same-document re-arm', () => {
+    let listener: ((message: unknown, sender: unknown, sendResponse: (response: unknown) => void) => void) | undefined;
+    vi.stubGlobal('chrome', {
+      runtime: {
+        onMessage: { addListener: vi.fn((value) => { listener = value; }) },
+        sendMessage: vi.fn().mockResolvedValue({ active: false, mode: 'quality', phase: 'idle' })
+      },
+      storage: { onChanged: { addListener: vi.fn() } }
+    });
+    registerContentTunnelRuntime();
+
+    const disconnected = vi.fn();
+    listener?.({ sessionId: 'old', type: 'target-disconnect' }, {}, disconnected);
+    expect(disconnected).toHaveBeenCalledWith({ ok: true });
+    expect(document.querySelector('#vacvox-tunnel-root')).toBeNull();
+
+    const armed = vi.fn();
+    listener?.({ session: { id: 'next' }, type: 'session:armed' }, {}, armed);
+    expect(armed).toHaveBeenCalledWith({ ok: true });
+    expect(document.querySelector('#vacvox-tunnel-root')).toBeTruthy();
   });
 });
 

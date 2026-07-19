@@ -8,10 +8,12 @@ import {
 } from './voivox-service.js';
 import {
   CrossWindowSessionStore,
+  type CrossWindowSessionInitial,
   type CrossWindowSessionPatch
 } from './cross-window-session.js';
 import type { TranscriptResult } from './pvtt-contract.js';
 import { serializeVoiceVacError } from './voice-vac-error.js';
+import { VOICE_VAC_ERROR_CODES } from './voice-vac-error.js';
 
 export const VOIVOX_EXTENSION_ORIGIN = 'chrome-extension://pepfpbobjbjehhhcjiokmneclohlffno';
 export const VOIVOX_VERSION = '0.1.1';
@@ -455,20 +457,39 @@ async function handleTunnelSessionRequest(
   return true;
 }
 
-function isTunnelCreateRequest(value: Record<string, unknown>): value is { tabId: number } & CrossWindowSessionPatch {
-  return isTunnelPatch(value) && typeof value.tabId === 'number' && Number.isInteger(value.tabId) && value.tabId >= 0;
+function isTunnelCreateRequest(value: Record<string, unknown>): value is { tabId: number } & CrossWindowSessionInitial {
+  const tabId = value.tabId;
+  return hasOnlyTunnelKeys(value, new Set([
+    'tabId', 'frameId', 'documentId', 'dropToken',
+    'state', 'errorCode', 'title', 'url', 'appEndpoint', 'pageEndpoint', 'targetRect'
+  ]))
+    && typeof tabId === 'number' && Number.isInteger(tabId) && tabId >= 0
+    && typeof value.frameId === 'number' && Number.isSafeInteger(value.frameId) && value.frameId >= 0
+    && typeof value.documentId === 'string' && value.documentId.length > 0 && value.documentId.trim() === value.documentId
+    && typeof value.dropToken === 'string'
+    && /^VOICE_VAC_DROP_V1\|[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\|[A-Za-z0-9_-]{43}$/iu.test(value.dropToken)
+    && hasValidTunnelMutableFields(value);
 }
 
 function isTunnelPatch(value: Record<string, unknown>): value is CrossWindowSessionPatch {
-  if (value.id !== undefined || value.updatedAt !== undefined) return false;
-  if (value.tabId !== undefined && (typeof value.tabId !== 'number' || !Number.isInteger(value.tabId) || value.tabId < 0)) return false;
+  return hasOnlyTunnelKeys(value, new Set([
+    'state', 'errorCode', 'title', 'url', 'appEndpoint', 'pageEndpoint', 'targetRect'
+  ])) && hasValidTunnelMutableFields(value);
+}
+
+function hasValidTunnelMutableFields(value: Record<string, unknown>): boolean {
   if (value.state !== undefined && !['idle', 'dragging', 'detecting', 'ready', 'transcribing', 'paused', 'completed', 'error'].includes(String(value.state))) return false;
+  if (value.errorCode !== undefined && !VOICE_VAC_ERROR_CODES.includes(value.errorCode as never)) return false;
   if (value.title !== undefined && (typeof value.title !== 'string' || value.title.length > 500)) return false;
   if (value.url !== undefined && (typeof value.url !== 'string' || value.url.length > 4_000)) return false;
   if (value.appEndpoint !== undefined && !isTunnelPoint(value.appEndpoint)) return false;
   if (value.pageEndpoint !== undefined && !isTunnelPoint(value.pageEndpoint)) return false;
   if (value.targetRect !== undefined && !isTunnelRect(value.targetRect)) return false;
   return true;
+}
+
+function hasOnlyTunnelKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
+  return Object.keys(value).every((key) => allowed.has(key));
 }
 
 function isTunnelPoint(value: unknown): value is { screenX: number; screenY: number } {
