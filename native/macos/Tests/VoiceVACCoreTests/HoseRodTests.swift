@@ -10,9 +10,13 @@ struct HoseRodTests {
     @Test("deployment reveals natural-length nodes instead of stretching a short rod")
     func activeLengthDeployment() {
         var rod = HoseRod(configuration: .voiceVAC, seed: 42)
-        expectSuccess(rod.pinRoot(.zero, orientation: .identity))
-        expectSuccess(rod.pinTip(SIMD3(480, 0, 0), orientation: .identity))
-        expectSuccess(rod.setActiveLength(500))
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: SIMD3(480, 0, 0),
+                tipOrientation: .identity,
+                activeLength: 500
+            )
+        )
 
         for _ in 0..<180 {
             expectSuccess(rod.step(deltaTime: step, iterations: 20))
@@ -26,9 +30,13 @@ struct HoseRodTests {
     func fullScreenDeployment() {
         var rod = HoseRod(configuration: .voiceVAC, seed: 7)
         let tip = SIMD3<Double>(2_100, 620, 0)
-        expectSuccess(rod.pinRoot(.zero, orientation: .identity))
-        expectSuccess(rod.pinTip(tip, orientation: .identity))
-        expectSuccess(rod.setActiveLength(2_200))
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: tip,
+                tipOrientation: .identity,
+                activeLength: 2_200
+            )
+        )
 
         for _ in 0..<240 {
             expectSuccess(rod.step(deltaTime: step, iterations: 24))
@@ -55,9 +63,13 @@ struct HoseRodTests {
     @Test("interior orientations are normalized continuous centerline frames")
     func centerlineOrientations() {
         var rod = HoseRod(configuration: .voiceVAC, seed: 55)
-        expectSuccess(rod.pinRoot(.zero, orientation: .identity))
-        expectSuccess(rod.pinTip(SIMD3(780, 210, 35), orientation: .identity))
-        expectSuccess(rod.setActiveLength(900))
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: SIMD3(780, 210, 35),
+                tipOrientation: .identity,
+                activeLength: 900
+            )
+        )
         for _ in 0..<180 {
             expectSuccess(rod.step(deltaTime: step, iterations: 20))
         }
@@ -96,9 +108,15 @@ struct HoseRodTests {
         let tip = SIMD3<Double>(680, 190, -15)
         var rod = HoseRod(configuration: .voiceVAC, seed: 100)
 
-        expectSuccess(rod.pinRoot(root, orientation: rootOrientation))
-        expectSuccess(rod.pinTip(tip, orientation: tipOrientation))
-        expectSuccess(rod.setActiveLength(760))
+        expectDeploymentSuccess(
+            rod.configurePins(
+                rootPosition: root,
+                rootOrientation: rootOrientation,
+                tipPosition: tip,
+                tipOrientation: tipOrientation,
+                activeLength: 760
+            )
+        )
         for _ in 0..<120 {
             expectSuccess(rod.step(deltaTime: step, iterations: 18))
         }
@@ -119,14 +137,22 @@ struct HoseRodTests {
             let phase = Double(index) * 0.03125
             let tip = SIMD3<Double>(820 + sin(phase) * 32, 180 + cos(phase) * 24, 0)
             for _ in 0..<1 {
-                expectSuccess(first.pinRoot(.zero, orientation: .identity))
-                expectSuccess(first.pinTip(tip, orientation: .identity))
-                expectSuccess(first.setActiveLength(940))
+                expectDeploymentSuccess(
+                    first.updateDeployment(
+                        tipPosition: tip,
+                        tipOrientation: .identity,
+                        activeLength: 940
+                    )
+                )
                 expectSuccess(first.step(deltaTime: step, iterations: 16))
 
-                expectSuccess(second.pinRoot(.zero, orientation: .identity))
-                expectSuccess(second.pinTip(tip, orientation: .identity))
-                expectSuccess(second.setActiveLength(940))
+                expectDeploymentSuccess(
+                    second.updateDeployment(
+                        tipPosition: tip,
+                        tipOrientation: .identity,
+                        activeLength: 940
+                    )
+                )
                 expectSuccess(second.step(deltaTime: step, iterations: 16))
             }
         }
@@ -139,17 +165,20 @@ struct HoseRodTests {
     func seededRestCurvature() {
         var first = HoseRod(configuration: .voiceVAC, seed: 1)
         var second = HoseRod(configuration: .voiceVAC, seed: 2)
-        for index in 0..<2 {
-            if index == 0 {
-                expectSuccess(first.pinRoot(.zero, orientation: .identity))
-                expectSuccess(first.pinTip(SIMD3(720, 0, 0), orientation: .identity))
-                expectSuccess(first.setActiveLength(800))
-            } else {
-                expectSuccess(second.pinRoot(.zero, orientation: .identity))
-                expectSuccess(second.pinTip(SIMD3(720, 0, 0), orientation: .identity))
-                expectSuccess(second.setActiveLength(800))
-            }
-        }
+        expectDeploymentSuccess(
+            first.updateDeployment(
+                tipPosition: SIMD3(720, 0, 0),
+                tipOrientation: .identity,
+                activeLength: 800
+            )
+        )
+        expectDeploymentSuccess(
+            second.updateDeployment(
+                tipPosition: SIMD3(720, 0, 0),
+                tipOrientation: .identity,
+                activeLength: 800
+            )
+        )
 
         for _ in 0..<180 {
             expectSuccess(first.step(deltaTime: step, iterations: 18))
@@ -165,8 +194,17 @@ struct HoseRodTests {
     @Test("600 fixed frames stay finite bounded and low-strain")
     func sixHundredFrameStability() {
         var rod = HoseRod(configuration: .voiceVAC, seed: 42)
-        expectSuccess(rod.pinRoot(SIMD3(40, 80, 0), orientation: .identity))
-        expectSuccess(rod.setActiveLength(1_600))
+        let root = SIMD3<Double>(40, 80, 0)
+        let initialTip = SIMD3<Double>(1_310, 590, 0)
+        expectDeploymentSuccess(
+            rod.configurePins(
+                rootPosition: root,
+                rootOrientation: .identity,
+                tipPosition: initialTip,
+                tipOrientation: .identity,
+                activeLength: 1_600
+            )
+        )
 
         var maximumObservedStrain = 0.0
         var finite = true
@@ -177,7 +215,13 @@ struct HoseRodTests {
                 470 + cos(t * 1.7) * 120,
                 sin(t * 0.7) * 16
             )
-            expectSuccess(rod.pinTip(tip, orientation: .identity))
+            expectDeploymentSuccess(
+                rod.updateDeployment(
+                    tipPosition: tip,
+                    tipOrientation: .identity,
+                    activeLength: 1_600
+                )
+            )
             expectSuccess(rod.step(deltaTime: step, iterations: 20))
             maximumObservedStrain = max(maximumObservedStrain, rod.maximumSegmentStrain)
             finite = finite && rod.snapshot.joints.allSatisfy(\.isFinite)
@@ -198,8 +242,6 @@ struct HoseRodTests {
     @Test("an abrupt pointer turn remains finite and inside the safety bound")
     func abruptTipTurn() {
         var rod = HoseRod(configuration: .voiceVAC, seed: 88)
-        expectSuccess(rod.pinRoot(.zero, orientation: .identity))
-        expectSuccess(rod.setActiveLength(1_300))
         let targets: [SIMD3<Double>] = [
             SIMD3(1_050, 120, 0),
             SIMD3(-720, 740, 0),
@@ -209,12 +251,21 @@ struct HoseRodTests {
         ]
 
         for target in targets {
-            expectSuccess(rod.pinTip(target, orientation: .identity))
+            expectDeploymentSuccess(
+                rod.updateDeployment(
+                    tipPosition: target,
+                    tipOrientation: .identity,
+                    activeLength: 1_300
+                )
+            )
             for _ in 0..<18 {
+                let before = rod.snapshot
                 let succeeded = rod.step(deltaTime: step, iterations: 24)
                 #expect(succeeded || rod.lastFailure != nil)
                 if succeeded {
                     #expect(rod.maximumSegmentStrain < 0.08)
+                } else {
+                    #expect(rod.snapshot == before)
                 }
                 let transientIsFinite = rod.snapshot.joints.allSatisfy { $0.isFinite }
                 #expect(transientIsFinite)
@@ -223,16 +274,20 @@ struct HoseRodTests {
             let allJointsAreFinite = rod.snapshot.joints.allSatisfy { $0.isFinite }
             #expect(allJointsAreFinite)
             #expect(rod.maximumDistanceFromRoot < 4_000)
-            #expect(rod.maximumSegmentStrain < 0.50)
+            #expect(rod.maximumSegmentStrain < 0.08)
         }
     }
 
     @Test("retraction removes reservoir nodes monotonically while retaining material identity")
     func monotonicRetraction() {
         var rod = HoseRod(configuration: .voiceVAC, seed: 42)
-        expectSuccess(rod.pinRoot(.zero, orientation: .identity))
-        expectSuccess(rod.pinTip(SIMD3(620, 80, 0), orientation: .identity))
-        expectSuccess(rod.setActiveLength(800))
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: SIMD3(620, 80, 0),
+                tipOrientation: .identity,
+                activeLength: 800
+            )
+        )
         for _ in 0..<60 {
             expectSuccess(rod.step(deltaTime: step, iterations: 20))
         }
@@ -257,9 +312,15 @@ struct HoseRodTests {
     @Test("snapshot is root-to-tip with immutable stable joint indices")
     func snapshotContract() {
         var rod = HoseRod(configuration: .voiceVAC, seed: 9)
-        expectSuccess(rod.pinRoot(SIMD3(10, 20, 0), orientation: .identity))
-        expectSuccess(rod.pinTip(SIMD3(400, 110, 0), orientation: .identity))
-        expectSuccess(rod.setActiveLength(460))
+        expectDeploymentSuccess(
+            rod.configurePins(
+                rootPosition: SIMD3(10, 20, 0),
+                rootOrientation: .identity,
+                tipPosition: SIMD3(400, 110, 0),
+                tipOrientation: .identity,
+                activeLength: 460
+            )
+        )
         let before = rod.snapshot
 
         #expect(before.joints.map(\.jointIndex) == Array(before.joints.indices))
@@ -267,7 +328,13 @@ struct HoseRodTests {
         #expect(before.joints.first?.position == SIMD3(10, 20, 0))
         #expect(before.joints.last?.position == SIMD3(400, 110, 0))
 
-        expectSuccess(rod.pinTip(SIMD3(410, 130, 0), orientation: .identity))
+        expectDeploymentSuccess(
+            rod.updateDeployment(
+                tipPosition: SIMD3(410, 130, 0),
+                tipOrientation: .identity,
+                activeLength: 460
+            )
+        )
         expectSuccess(rod.step(deltaTime: step, iterations: 12))
         #expect(before != rod.snapshot)
         #expect(before.joints.first?.position == SIMD3(10, 20, 0))
@@ -373,27 +440,40 @@ struct HoseRodTests {
         #expect(rod.snapshot.joints.last?.position == SIMD3(820, 120, 0))
     }
 
-    @Test("legacy active-length changes reject infeasible pending pins atomically")
-    func legacyActiveLengthIsAtomic() {
+    @Test("tip pin rejects an infeasible span without publishing pending state")
+    func tipPinIsAtomic() {
         var rod = HoseRod(configuration: .voiceVAC, seed: 33)
-        expectSuccess(rod.pinRoot(.zero, orientation: .identity))
-        expectSuccess(rod.pinTip(SIMD3(1_200, 0, 0), orientation: .identity))
         let before = rod.snapshot
 
-        expectFailure(rod.setActiveLength(500))
+        expectFailure(rod.pinTip(SIMD3(1_200, 0, 0), orientation: .identity))
 
         guard case let .infeasibleSpan(span, availableLength) = rod.lastFailure else {
             Issue.record("Expected typed infeasible-span failure")
             return
         }
         #expect(span == 1_200)
-        #expect(availableLength == 500)
+        #expect(availableLength == rod.configuration.naturalSegmentLength)
         #expect(rod.snapshot == before)
-        #expect(rod.maximumSegmentStrain > 0.08)
     }
 
-    @Test("zero-rest displaced segments report unbounded strain")
-    func zeroRestDisplacementIsNotReportedAsZeroStrain() {
+    @Test("root pin rejects an infeasible span without publishing pending state")
+    func rootPinIsAtomic() {
+        var rod = HoseRod(configuration: .voiceVAC, seed: 34)
+        let before = rod.snapshot
+
+        expectFailure(rod.pinRoot(SIMD3(-1_200, 0, 0), orientation: .identity))
+
+        guard case let .infeasibleSpan(span, availableLength) = rod.lastFailure else {
+            Issue.record("Expected typed infeasible-span failure")
+            return
+        }
+        #expect(span == 1_200 + rod.configuration.naturalSegmentLength)
+        #expect(availableLength == rod.configuration.naturalSegmentLength)
+        #expect(rod.snapshot == before)
+    }
+
+    @Test("active-length changes reject an infeasible current span atomically")
+    func legacyActiveLengthIsAtomic() {
         var rod = HoseRod(configuration: .voiceVAC, seed: 34)
         let initial = rod.snapshot
 
@@ -405,11 +485,6 @@ struct HoseRodTests {
         #expect(span == rod.configuration.naturalSegmentLength)
         #expect(availableLength == 0)
         #expect(rod.snapshot == initial)
-
-        expectDeploymentSuccess(rod.retract(by: rod.configuration.naturalSegmentLength))
-        #expect(rod.activeLength == 0)
-        expectSuccess(rod.pinTip(SIMD3(1, 0, 0), orientation: .identity))
-        #expect(rod.maximumSegmentStrain == .infinity)
     }
 
     @Test("retraction moves the tip atomically once slack is exhausted")
@@ -746,13 +821,12 @@ struct HoseRodTests {
         }
     }
 
-    @Test("failed angular steps restore positions and orientations atomically")
-    func failedAngularStepIsAtomic() {
-        var rod = HoseRod(configuration: .voiceVAC, seed: 114)
-        let tip = SIMD3<Double>(720, 0, 0)
+    @Test("root orientation changes reject or redistribute without an unsafe snapshot")
+    func rootOrientationPinIsAtomic() {
+        var rod = HoseRod(configuration: .voiceVAC, seed: 115)
         expectDeploymentSuccess(
             rod.updateDeployment(
-                tipPosition: tip,
+                tipPosition: SIMD3(720, 0, 0),
                 tipOrientation: .identity,
                 activeLength: 800
             )
@@ -760,21 +834,20 @@ struct HoseRodTests {
         for _ in 0..<120 {
             expectSuccess(rod.step(deltaTime: step, iterations: 24))
         }
-        expectSuccess(
-            rod.pinRoot(
-                .zero,
-                orientation: simd_quatd(
-                    angle: .pi,
-                    axis: SIMD3<Double>(0, 1, 0)
-                )
+
+        let before = rod.snapshot
+        let succeeded = rod.pinRoot(
+            .zero,
+            orientation: simd_quatd(
+                angle: .pi,
+                axis: SIMD3<Double>(0, 1, 0)
             )
         )
-
-        for _ in 0..<2 {
-            let before = rod.snapshot
-            expectFailure(rod.step(deltaTime: step, iterations: 24))
+        if succeeded {
+            #expect(maximumAdjacentAngle(in: rod.snapshot) <= 1.10)
+        } else {
             guard case .angularLimitExceeded = rod.lastFailure else {
-                Issue.record("Expected typed angular failure")
+                Issue.record("Expected typed angular rejection")
                 return
             }
             #expect(rod.snapshot == before)

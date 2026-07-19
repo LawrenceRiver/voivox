@@ -37,7 +37,6 @@ public struct HoseRod: Sendable {
     private var rootPin: (position: SIMD3<Double>, orientation: simd_quatd)
     private var tipPin: (position: SIMD3<Double>, orientation: simd_quatd)
     private var nextMaterialID: UInt64
-    private var hasExplicitTipPin: Bool
 
     public init(configuration: HoseConfiguration, seed: UInt64) {
         self.configuration = configuration
@@ -61,7 +60,6 @@ public struct HoseRod: Sendable {
         rootPin = (.zero, .identity)
         tipPin = (tipPosition, .identity)
         nextMaterialID = 2
-        hasExplicitTipPin = false
         stretchConstraints = []
         bendConstraints = []
         orientationLambdas = [.zero, .zero]
@@ -128,19 +126,14 @@ public struct HoseRod: Sendable {
         _ position: SIMD3<Double>,
         orientation: simd_quatd
     ) -> Bool {
-        guard vectorIsFinite(position),
-              let orientation = safeNormalizedQuaternion(orientation)
-        else {
-            lastFailure = .nonFinitePin
-            return false
-        }
-
-        rootPin = (position, orientation)
-        nodes[0].position = position
-        nodes[0].previousPosition = position
-        nodes[0].orientation = orientation
-        nodes[0].inverseMass = 0
-        lastFailure = nil
+        let result = configurePins(
+            rootPosition: position,
+            rootOrientation: orientation,
+            tipPosition: tipPin.position,
+            tipOrientation: tipPin.orientation,
+            activeLength: activeLength
+        )
+        guard case .success = result else { return false }
         return true
     }
 
@@ -149,39 +142,14 @@ public struct HoseRod: Sendable {
         _ position: SIMD3<Double>,
         orientation: simd_quatd
     ) -> Bool {
-        guard vectorIsFinite(position),
-              let orientation = safeNormalizedQuaternion(orientation)
-        else {
-            lastFailure = .nonFinitePin
-            return false
-        }
-
-        let span = simd_distance(rootPin.position, position)
-        if span <= activeLength + 1e-9 {
-            let result = updateDeployment(
-                tipPosition: position,
-                tipOrientation: orientation,
-                activeLength: activeLength
-            )
-            guard case .success = result else { return false }
-            return true
-        }
-
-        // Preserve the legacy two-call setup (`pinTip`, then
-        // `setActiveLength`) only while the pending span is longer than the
-        // currently deployed material. A feasible move uses the atomic path
-        // above so callers never need failed solver frames to converge it.
-        tipPin = (position, orientation)
-        nodes[nodes.count - 1].position = position
-        nodes[nodes.count - 1].previousPosition = position
-        nodes[nodes.count - 1].orientation = orientation
-        nodes[nodes.count - 1].inverseMass = 0
-        if !hasExplicitTipPin, nodes.count > 2 {
-            layoutInteriorAlongRestCurve()
-            rebuildConstraints()
-        }
-        hasExplicitTipPin = true
-        lastFailure = nil
+        let result = configurePins(
+            rootPosition: rootPin.position,
+            rootOrientation: rootPin.orientation,
+            tipPosition: position,
+            tipOrientation: orientation,
+            activeLength: activeLength
+        )
+        guard case .success = result else { return false }
         return true
     }
 
@@ -192,16 +160,14 @@ public struct HoseRod: Sendable {
             return false
         }
         let clamped = min(max(requestedLength, 0), configuration.maximumActiveLength)
-        let preserveImplicitTip = !hasExplicitTipPin
-        let result = updateDeployment(
+        let result = configurePins(
+            rootPosition: rootPin.position,
+            rootOrientation: rootPin.orientation,
             tipPosition: tipPin.position,
             tipOrientation: tipPin.orientation,
             activeLength: clamped
         )
         guard case .success = result else { return false }
-        if preserveImplicitTip {
-            hasExplicitTipPin = false
-        }
         return true
     }
 
@@ -210,7 +176,25 @@ public struct HoseRod: Sendable {
         tipOrientation: simd_quatd,
         activeLength requestedLength: Double
     ) -> Result<Void, HoseSimulationFailure> {
-        guard vectorIsFinite(tipPosition),
+        configurePins(
+            rootPosition: rootPin.position,
+            rootOrientation: rootPin.orientation,
+            tipPosition: tipPosition,
+            tipOrientation: tipOrientation,
+            activeLength: requestedLength
+        )
+    }
+
+    public mutating func configurePins(
+        rootPosition: SIMD3<Double>,
+        rootOrientation: simd_quatd,
+        tipPosition: SIMD3<Double>,
+        tipOrientation: simd_quatd,
+        activeLength requestedLength: Double
+    ) -> Result<Void, HoseSimulationFailure> {
+        guard vectorIsFinite(rootPosition),
+              let rootOrientation = safeNormalizedQuaternion(rootOrientation),
+              vectorIsFinite(tipPosition),
               let tipOrientation = safeNormalizedQuaternion(tipOrientation)
         else {
             lastFailure = .nonFinitePin
@@ -228,7 +212,7 @@ public struct HoseRod: Sendable {
             lastFailure = failure
             return .failure(failure)
         }
-        let span = simd_distance(rootPin.position, tipPosition)
+        let span = simd_distance(rootPosition, tipPosition)
         guard span <= requestedLength + 1e-9 else {
             let failure = HoseSimulationFailure.infeasibleSpan(
                 span: span,
@@ -257,7 +241,11 @@ public struct HoseRod: Sendable {
         }
 
         let rollback = self
+        rootPin = (rootPosition, rootOrientation)
         tipPin = (tipPosition, tipOrientation)
+        nodes[0].position = rootPosition
+        nodes[0].previousPosition = rootPosition
+        nodes[0].orientation = rootOrientation
         let last = nodes.count - 1
         nodes[last].position = tipPosition
         nodes[last].previousPosition = tipPosition
@@ -270,7 +258,6 @@ public struct HoseRod: Sendable {
         } else {
             refitToRestGeometryIfNeeded()
         }
-        hasExplicitTipPin = true
         projectPins()
         let allowedStrain = 0.08
         let strain = maximumSegmentStrain
@@ -672,67 +659,6 @@ public struct HoseRod: Sendable {
                 fraction: fraction
             )
         }
-    }
-
-    private mutating func layoutInteriorAlongRestCurve() {
-        let points = restCurvePoints(count: nodes.count)
-        guard points.count == nodes.count else { return }
-        for index in 1..<(nodes.count - 1) {
-            nodes[index].position = points[index]
-            nodes[index].previousPosition = points[index]
-            nodes[index].orientation = orientationFromForward(
-                points[index + 1] - points[index - 1]
-            )
-        }
-        projectPins()
-    }
-
-    private func restCurvePoints(count: Int) -> [SIMD3<Double>] {
-        guard count >= 2 else { return [rootPin.position] }
-        let root = rootPin.position
-        let tip = tipPin.position
-        let endpointDelta = tip - root
-        let endpointDistance = simd_length(endpointDelta)
-        let rootForward = rootPin.orientation.act(SIMD3<Double>(1, 0, 0))
-        let direction: SIMD3<Double>
-        if endpointDistance > 1e-9 {
-            direction = endpointDelta / endpointDistance
-        } else if simd_length(rootForward) > 1e-9 {
-            direction = simd_normalize(rootForward)
-        } else {
-            direction = SIMD3(1, 0, 0)
-        }
-
-        let reference = abs(direction.z) < 0.82
-            ? SIMD3<Double>(0, 0, 1)
-            : SIMD3<Double>(0, 1, 0)
-        let lateral = simd_normalize(simd_cross(reference, direction))
-        let normal = simd_normalize(simd_cross(direction, lateral))
-        let slack = max(0, activeLength - endpointDistance)
-        let amplitude = min(configuration.naturalSegmentLength * 0.75, slack * 0.30)
-        let phases = seededPhases()
-        let lengths = restSegmentLengths(for: count)
-        var cumulative = 0.0
-        var points: [SIMD3<Double>] = []
-        points.reserveCapacity(count)
-
-        for index in 0..<count {
-            if index > 0 {
-                cumulative += lengths[index - 1]
-            }
-            let fraction = activeLength > 1e-9
-                ? min(max(cumulative / activeLength, 0), 1)
-                : Double(index) / Double(count - 1)
-            let envelope = sin(.pi * fraction)
-            let firstWave = sin(2 * .pi * fraction + phases.0)
-            let secondWave = sin(3 * .pi * fraction + phases.1)
-            let offset = lateral * (amplitude * envelope * (0.72 + 0.28 * firstWave)) +
-                normal * (amplitude * 0.28 * envelope * secondWave)
-            points.append(root + endpointDelta * fraction + offset)
-        }
-        points[0] = root
-        points[count - 1] = tip
-        return points
     }
 
     private func restSegmentLengths() -> [Double] {
