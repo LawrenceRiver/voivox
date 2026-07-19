@@ -5,6 +5,8 @@ dist/
 **/dist/
 release/
 **/release/
+!scripts/release/
+!scripts/release/**
 !docs/release/
 !docs/release/*.md
 *.tsbuildinfo
