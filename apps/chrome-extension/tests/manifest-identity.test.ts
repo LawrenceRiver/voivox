@@ -4,9 +4,12 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 describe('Chrome extension identity', () => {
-  it('pins the public key that produces the stable Voice Vac extension origin', async () => {
+  it.each([
+    ['store', 'pepfpbobjbjehhhcjiokmneclohlffno'],
+    ['automation', 'ciijinidnlbokpbeiabifcnoighmbnmh']
+  ] as const)('pins the %s public key to its stable extension origin', async (channel, expected) => {
     const manifest = JSON.parse(
-      await readFile(new URL('../public/manifest.json', import.meta.url), 'utf8')
+      await readFile(new URL(`../config/manifest.${channel}.json`, import.meta.url), 'utf8')
     ) as { key?: unknown };
 
     expect(typeof manifest.key).toBe('string');
@@ -17,6 +20,6 @@ describe('Chrome extension identity', () => {
       .map((nibble) => String.fromCharCode('a'.charCodeAt(0) + nibble))
       .join('');
 
-    expect(extensionId).toBe('pepfpbobjbjehhhcjiokmneclohlffno');
+    expect(extensionId).toBe(expected);
   });
 });

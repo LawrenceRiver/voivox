@@ -1,0 +1,13 @@
+{
+  "name": "Voice VAC Automation",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4I698V8DRnNwnDkGzvJfs009OZMCuVfnRff1v4OS243yC/JH/9Xi1KOhmqNTfVcPImSlmS4PqK3tsQuRpNd5tCtYaj5C8/3k94LphHplk2H0FQ7SLdipYWq2SMs4kpFJ1pke4ePIo6v29SwB3iswPAURsox7DWb3ghkvmuJcCS9gVlVihYIFOi49zp5DRUf2xlKYJBXb0dCp8mSmWZdH5ZwX50jWM1USGomxYo5fdmiryBU/tVc2agWnpzx1kJoVDHn8XxY/XzJpOOMEjFbB+ygWL0GI/EuFVUwp0O+o/8gcfAGQHULG0JWZU4VIjPZ3Yxyp6C6C5H+mTD+hX0OOmwIDAQAB",
+  "permissions": [
+    "activeTab",
+    "nativeMessaging",
+    "offscreen",
+    "scripting",
+    "storage",
+    "tabCapture",
+    "debugger"
+  ]
+}

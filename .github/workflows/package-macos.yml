@@ -25,7 +25,8 @@ jobs:
       - run: swift test
         working-directory: native/macos
       - run: npm run package:mac --workspace=@voivox/desktop
-      - run: npm run package:zip --workspace=@voivox/chrome-extension
+      - run: npm run package:store --workspace=@voivox/chrome-extension
+      - run: npm run package:automation --workspace=@voivox/chrome-extension
       - name: Generate SHA-256 checksums
         run: |
           : > SHA256SUMS.txt
@@ -33,7 +34,8 @@ jobs:
           artifacts=(
             apps/desktop/release/Vac\ Vox-*.dmg
             apps/desktop/release/Vac\ Vox-*.zip
-            apps/chrome-extension/release/VoiceVac-Chrome-Extension-*.zip
+            apps/chrome-extension/release/Voice-VAC-Store-*.zip
+            apps/chrome-extension/release/Voice-VAC-Automation-*.zip
           )
           for artifact in "${artifacts[@]}"
           do
@@ -47,7 +49,8 @@ jobs:
             apps/desktop/release/Voice Vac-*.dmg
             apps/desktop/release/Voice Vac-*.zip
             apps/desktop/release/Voice Vac-*.blockmap
-            apps/chrome-extension/release/VoiceVac-Chrome-Extension-*.zip
+            apps/chrome-extension/release/Voice-VAC-Store-*.zip
+            apps/chrome-extension/release/Voice-VAC-Automation-*.zip
             SHA256SUMS.txt
           if-no-files-found: error
       - name: Publish tagged GitHub Release
@@ -59,7 +62,8 @@ jobs:
           artifacts=(
             apps/desktop/release/Vac\ Vox-*.dmg
             apps/desktop/release/Vac\ Vox-*.zip
-            apps/chrome-extension/release/VoiceVac-Chrome-Extension-*.zip
+            apps/chrome-extension/release/Voice-VAC-Store-*.zip
+            apps/chrome-extension/release/Voice-VAC-Automation-*.zip
           )
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" \
