@@ -1,3 +1,5 @@
+import VoiceVACCore
+
 @MainActor
 protocol WindowCoordinating: AnyObject {
     func start(with store: VoiceVACStore)
@@ -11,10 +13,17 @@ protocol AppEnvironmentFactory {
 @MainActor
 struct LiveAppEnvironmentFactory: AppEnvironmentFactory {
     func makeEnvironment() -> AppEnvironment {
-        AppEnvironment(
+        let screenProvider = NSScreenProvider()
+        let overlayCoordinator = OverlayCoordinator(
+            screenProvider: screenProvider,
+            panelFactory: LivePanelFactory(),
+            layoutEngine: OverlayLayoutEngine(),
+            placementStore: CapsulePlacementStore(defaults: .standard)
+        )
+        return AppEnvironment(
             store: VoiceVACStore(),
             statusItemController: StatusItemController(),
-            windowCoordinator: LifecycleWindowCoordinator()
+            windowCoordinator: overlayCoordinator
         )
     }
 }
