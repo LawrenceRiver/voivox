@@ -469,6 +469,28 @@ struct HoseRodTests {
         #expect(rod.maximumSegmentStrain < 0.08)
     }
 
+    @Test("same-length tip moves refit or reject before reporting atomic success")
+    func sameLengthTipMovesStaySafe() {
+        var rod = HoseRod(configuration: .voiceVAC, seed: 68)
+        let activeLength = 39.6
+        for tipX in [30.0, 32.0, 34.0, 36.0] {
+            let before = rod.snapshot
+            let result = rod.updateDeployment(
+                tipPosition: SIMD3(tipX, 0, 0),
+                tipOrientation: .identity,
+                activeLength: activeLength
+            )
+            switch result {
+            case .success:
+                #expect(rod.maximumSegmentStrain < 0.08)
+            case .failure(.strainLimitExceeded):
+                #expect(rod.snapshot == before)
+            case let .failure(failure):
+                Issue.record("Unexpected deployment failure: \(failure)")
+            }
+        }
+    }
+
     @Test("topology hysteresis prevents node churn around a bay boundary")
     func topologyBoundaryHysteresis() {
         var rod = HoseRod(configuration: .voiceVAC, seed: 77)

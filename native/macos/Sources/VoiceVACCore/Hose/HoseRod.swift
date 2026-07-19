@@ -241,6 +241,7 @@ public struct HoseRod: Sendable {
             return .failure(failure)
         }
 
+        let rollback = self
         tipPin = (tipPosition, tipOrientation)
         let last = nodes.count - 1
         nodes[last].position = tipPosition
@@ -251,9 +252,22 @@ public struct HoseRod: Sendable {
                 requestedLength,
                 nodeCount: resolvedNodeCount
             )
+        } else {
+            refitToRestGeometryIfNeeded()
         }
         hasExplicitTipPin = true
         projectPins()
+        let allowedStrain = 0.08
+        let strain = maximumSegmentStrain
+        guard strain < allowedStrain else {
+            let failure = HoseSimulationFailure.strainLimitExceeded(
+                maximum: strain,
+                allowed: allowedStrain
+            )
+            self = rollback
+            lastFailure = failure
+            return .failure(failure)
+        }
         lastFailure = nil
         return .success(())
     }
@@ -508,7 +522,8 @@ public struct HoseRod: Sendable {
     private func naturalBridgePoints(
         from start: SIMD3<Double>,
         to end: SIMD3<Double>,
-        segmentLengths: [Double]
+        segmentLengths: [Double],
+        initialPoints: [SIMD3<Double>]? = nil
     ) -> [SIMD3<Double>] {
         guard !segmentLengths.isEmpty else { return [start] }
         let totalLength = segmentLengths.reduce(0, +)
@@ -547,6 +562,18 @@ public struct HoseRod: Sendable {
             points.append(linePoint + lateral * signedAmplitude)
         }
         points.append(end)
+
+        // Reusing the current material positions gives FABRIK the closest
+        // feasible solution when a pin moves. Starting every refit from the
+        // decorative slack seed can mirror the whole hose across its axis,
+        // which is positionally valid but creates an avoidable frame jump.
+        if let initialPoints,
+           initialPoints.count == points.count,
+           initialPoints.allSatisfy(vectorIsFinite) {
+            points = initialPoints
+            points[0] = start
+            points[points.count - 1] = end
+        }
 
         func deterministicDirection(_ index: Int) -> SIMD3<Double> {
             let sign = index.isMultiple(of: 2) ? 1.0 : -1.0
@@ -716,7 +743,8 @@ public struct HoseRod: Sendable {
         let points = naturalBridgePoints(
             from: rootPin.position,
             to: tipPin.position,
-            segmentLengths: lengths
+            segmentLengths: lengths,
+            initialPoints: nodes.map(\.position)
         )
         guard points.count == nodes.count else { return }
         for index in 1..<(nodes.count - 1) {
