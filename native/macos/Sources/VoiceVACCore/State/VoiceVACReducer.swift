@@ -38,14 +38,20 @@ public enum VoiceVACReducer {
             }
 
         case let .targetRejected(failure, attemptID):
-            if (next.phase == .dragging
-                    || next.phase == .targetDetected
-                    || next.phase == .tabAudioOnly),
-                next.attemptID == attemptID
-            {
-                next.phase = .warningYellow
-                next.target = nil
-                next.failure = failure
+            if next.attemptID == attemptID {
+                switch next.phase {
+                case .dragging, .targetDetected, .tabAudioOnly:
+                    next.phase = .warningYellow
+                    next.target = nil
+                    next.failure = failure
+                case .ready, .transcribing, .paused:
+                    if next.target != nil {
+                        next.phase = .warningYellow
+                        next.failure = failure
+                    }
+                case .idle, .completed, .retracting, .warningYellow:
+                    break
+                }
             }
 
         case .primaryButtonPressed:

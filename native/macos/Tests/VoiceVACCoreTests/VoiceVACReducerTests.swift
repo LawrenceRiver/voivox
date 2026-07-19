@@ -234,6 +234,98 @@ struct VoiceVACReducerTests {
         #expect(completed.effects.isEmpty)
     }
 
+    @Test(
+        "current runtime target failure warns without losing the deployed session",
+        arguments: VoiceVACPhase.runtimeFailurePhases
+    )
+    func currentRuntimeFailureEntersWarning(phase: VoiceVACPhase) {
+        let failure = VoiceVACFailure(
+            code: .targetNavigated,
+            message: "The current target changed."
+        )
+        let state = VoiceVACState(
+            phase: phase,
+            nozzleGlobalPoint: CGPoint(x: 640, y: 360),
+            target: .fixture,
+            transcriptPreview: "keep me",
+            attemptID: .attemptA
+        )
+
+        let transition = VoiceVACReducer.reduce(
+            state: state,
+            action: .targetRejected(failure, attemptID: .attemptA)
+        )
+
+        #expect(transition.state.phase == .warningYellow)
+        #expect(transition.state.nozzleGlobalPoint == state.nozzleGlobalPoint)
+        #expect(transition.state.target == state.target)
+        #expect(transition.state.transcriptPreview == state.transcriptPreview)
+        #expect(transition.state.attemptID == state.attemptID)
+        #expect(transition.state.failure == failure)
+        #expect(transition.effects.isEmpty)
+    }
+
+    @Test(
+        "old attempt cannot warn a current runtime session",
+        arguments: VoiceVACPhase.runtimeFailurePhases
+    )
+    func staleRuntimeFailureIsIgnored(phase: VoiceVACPhase) {
+        let state = VoiceVACState(
+            phase: phase,
+            nozzleGlobalPoint: CGPoint(x: 640, y: 360),
+            target: .fixture,
+            attemptID: .attemptB
+        )
+        let failure = VoiceVACFailure(code: .targetNavigated, message: "Stale")
+
+        let transition = VoiceVACReducer.reduce(
+            state: state,
+            action: .targetRejected(failure, attemptID: .attemptA)
+        )
+
+        #expect(transition.state == state)
+        #expect(transition.effects.isEmpty)
+    }
+
+    @Test(
+        "runtime failure requires a current target",
+        arguments: VoiceVACPhase.runtimeFailurePhases
+    )
+    func runtimeFailureWithoutTargetIsIgnored(phase: VoiceVACPhase) {
+        let state = VoiceVACState(phase: phase, attemptID: .attemptA)
+        let failure = VoiceVACFailure(code: .targetNavigated, message: "No target")
+
+        let transition = VoiceVACReducer.reduce(
+            state: state,
+            action: .targetRejected(failure, attemptID: .attemptA)
+        )
+
+        #expect(transition.state == state)
+        #expect(transition.effects.isEmpty)
+    }
+
+    @Test(
+        "terminal and idle phases reject even the current attempt failure",
+        arguments: VoiceVACPhase.nonWarningFailurePhases
+    )
+    func terminalFailureIsIgnored(phase: VoiceVACPhase) {
+        let state = VoiceVACState(
+            phase: phase,
+            nozzleGlobalPoint: CGPoint(x: 640, y: 360),
+            target: .fixture,
+            attemptID: .attemptA
+        )
+        let failure = VoiceVACFailure(code: .targetNavigated, message: "Too late")
+
+        let transition = VoiceVACReducer.reduce(
+            state: state,
+            action: .targetRejected(failure, attemptID: .attemptA)
+        )
+
+        #expect(transition.state == state)
+        #expect(transition.effects.isEmpty)
+    }
+
     @Test("primary button pauses and resumes an active capture")
     func primaryButtonTogglesCapture() {
         let target = VideoTarget.fixture
@@ -466,6 +558,18 @@ private extension UUID {
 }
 
 private extension VoiceVACPhase {
+    static let runtimeFailurePhases: [VoiceVACPhase] = [
+        .ready,
+        .transcribing,
+        .paused
+    ]
+
+    static let nonWarningFailurePhases: [VoiceVACPhase] = [
+        .idle,
+        .completed,
+        .retracting
+    ]
+
     static let everyCase: [VoiceVACPhase] = [
         .idle,
         .dragging,
