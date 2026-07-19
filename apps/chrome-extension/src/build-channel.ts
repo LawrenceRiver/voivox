@@ -1,0 +1,1 @@
+export const BUILD_CHANNEL = __VOICE_VAC_CHANNEL__;
