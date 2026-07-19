@@ -7,33 +7,46 @@ public enum VoiceVACReducer {
         var effects: [VoiceVACEffect] = []
 
         switch action {
-        case let .beginNozzleDrag(point):
+        case let .beginNozzleDrag(point, attemptID):
             next.phase = .dragging
             next.nozzleGlobalPoint = point
             next.target = nil
             next.failure = nil
+            next.attemptID = attemptID
 
         case let .moveNozzle(point):
             next.nozzleGlobalPoint = point
 
-        case let .targetDetected(target):
-            if next.phase == .dragging {
+        case let .targetDetected(target, attemptID):
+            if next.phase == .dragging, next.attemptID == attemptID {
                 next.phase = target.kind == .tabAudio ? .tabAudioOnly : .targetDetected
                 next.target = target
                 next.failure = nil
             }
 
-        case let .targetResolved(target):
-            if next.phase == .targetDetected || next.phase == .tabAudioOnly {
+        case let .targetResolved(target, attemptID):
+            if (next.phase == .targetDetected || next.phase == .tabAudioOnly),
+                next.attemptID == attemptID,
+                let pendingTarget = next.target,
+                pendingTarget.id == target.id,
+                pendingTarget.documentID == target.documentID,
+                pendingTarget.frameID == target.frameID
+            {
                 next.phase = .ready
                 next.target = target
                 next.failure = nil
             }
 
-        case let .targetRejected(failure):
-            next.phase = .warningYellow
-            next.target = nil
-            next.failure = failure
+        case let .targetRejected(failure, attemptID):
+            if (next.phase == .dragging
+                    || next.phase == .targetDetected
+                    || next.phase == .tabAudioOnly),
+                next.attemptID == attemptID
+            {
+                next.phase = .warningYellow
+                next.target = nil
+                next.failure = failure
+            }
 
         case .primaryButtonPressed:
             switch next.phase {

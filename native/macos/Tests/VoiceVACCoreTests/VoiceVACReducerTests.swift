@@ -54,7 +54,8 @@ struct VoiceVACReducerTests {
     func rejectedTargetStaysDeployed() {
         let deployed = VoiceVACState(
             phase: .dragging,
-            nozzleGlobalPoint: CGPoint(x: 900, y: 500)
+            nozzleGlobalPoint: CGPoint(x: 900, y: 500),
+            attemptID: .attemptA
         )
         let failure = VoiceVACFailure(
             code: .noPlayableMedia,
@@ -63,11 +64,12 @@ struct VoiceVACReducerTests {
 
         let transition = VoiceVACReducer.reduce(
             state: deployed,
-            action: .targetRejected(failure)
+            action: .targetRejected(failure, attemptID: .attemptA)
         )
 
         #expect(transition.state.phase == .warningYellow)
         #expect(transition.state.nozzleGlobalPoint == CGPoint(x: 900, y: 500))
+        #expect(transition.state.attemptID == .attemptA)
         #expect(transition.state.failure == failure)
         #expect(!transition.effects.contains(.beginRetraction))
     }
@@ -77,11 +79,14 @@ struct VoiceVACReducerTests {
         let target = VideoTarget.fixture
         let dragging = VoiceVACReducer.reduce(
             state: .idle,
-            action: .beginNozzleDrag(at: CGPoint(x: 240, y: 180))
+            action: .beginNozzleDrag(
+                at: CGPoint(x: 240, y: 180),
+                attemptID: .attemptA
+            )
         )
         let detected = VoiceVACReducer.reduce(
             state: dragging.state,
-            action: .targetDetected(target)
+            action: .targetDetected(target, attemptID: .attemptA)
         )
         #expect(detected.state.phase == .targetDetected)
         #expect(detected.state.target == target)
@@ -96,7 +101,7 @@ struct VoiceVACReducerTests {
 
         let ready = VoiceVACReducer.reduce(
             state: prematurePress.state,
-            action: .targetResolved(target)
+            action: .targetResolved(target, attemptID: .attemptA)
         )
         #expect(ready.state.phase == .ready)
         #expect(ready.state.target == target)
@@ -114,7 +119,7 @@ struct VoiceVACReducerTests {
     func targetDetectionCannotBypassDragging() {
         let transition = VoiceVACReducer.reduce(
             state: .idle,
-            action: .targetDetected(.fixture)
+            action: .targetDetected(.fixture, attemptID: .attemptA)
         )
 
         #expect(transition.state == .idle)
@@ -125,11 +130,108 @@ struct VoiceVACReducerTests {
     func targetResolutionCannotBypassDetection() {
         let transition = VoiceVACReducer.reduce(
             state: .idle,
-            action: .targetResolved(.fixture)
+            action: .targetResolved(.fixture, attemptID: .attemptA)
         )
 
         #expect(transition.state == .idle)
         #expect(transition.effects.isEmpty)
+    }
+
+    @Test("target resolution is bound to the current attempt and pending identity")
+    func targetResolutionRequiresMatchingHandshake() {
+        let pendingTarget = VideoTarget.fixture
+        let dragging = VoiceVACReducer.reduce(
+            state: .idle,
+            action: .beginNozzleDrag(at: .zero, attemptID: .attemptA)
+        ).state
+        let detected = VoiceVACReducer.reduce(
+            state: dragging,
+            action: .targetDetected(pendingTarget, attemptID: .attemptA)
+        ).state
+        let mismatchedTargets = [
+            VideoTarget.fixture(id: "target-B"),
+            VideoTarget.fixture(documentID: "document-B"),
+            VideoTarget.fixture(frameID: 7)
+        ]
+
+        for mismatchedTarget in mismatchedTargets {
+            let transition = VoiceVACReducer.reduce(
+                state: detected,
+                action: .targetResolved(mismatchedTarget, attemptID: .attemptA)
+            )
+            #expect(transition.state == detected)
+            #expect(transition.effects.isEmpty)
+        }
+
+        let staleAttempt = VoiceVACReducer.reduce(
+            state: detected,
+            action: .targetResolved(pendingTarget, attemptID: .attemptB)
+        )
+        #expect(staleAttempt.state == detected)
+        #expect(staleAttempt.effects.isEmpty)
+    }
+
+    @Test("target detection from an old attempt is ignored")
+    func targetDetectionRequiresCurrentAttempt() {
+        let currentDrag = VoiceVACReducer.reduce(
+            state: .idle,
+            action: .beginNozzleDrag(at: .zero, attemptID: .attemptB)
+        ).state
+
+        let transition = VoiceVACReducer.reduce(
+            state: currentDrag,
+            action: .targetDetected(.fixture, attemptID: .attemptA)
+        )
+
+        #expect(transition.state == currentDrag)
+        #expect(transition.effects.isEmpty)
+    }
+
+    @Test("stale rejection cannot mutate idle, retracting, or a new drag")
+    func staleTargetRejectionIsIgnored() {
+        let failure = VoiceVACFailure(code: .noPlayableMedia, message: "Stale")
+        let idle = VoiceVACState.idle
+        let retracting = VoiceVACState(
+            phase: .retracting,
+            nozzleGlobalPoint: CGPoint(x: 100, y: 200),
+            attemptID: .attemptA
+        )
+        let newDrag = VoiceVACReducer.reduce(
+            state: .idle,
+            action: .beginNozzleDrag(at: CGPoint(x: 300, y: 400), attemptID: .attemptB)
+        ).state
+
+        for state in [idle, retracting, newDrag] {
+            let transition = VoiceVACReducer.reduce(
+                state: state,
+                action: .targetRejected(failure, attemptID: .attemptA)
+            )
+            #expect(transition.state == state)
+            #expect(transition.effects.isEmpty)
+        }
+    }
+
+    @Test("old rejection cannot prevent current retraction completion")
+    func staleRejectionDoesNotBreakRetractionCompletion() {
+        let retracting = VoiceVACState(
+            phase: .retracting,
+            nozzleGlobalPoint: CGPoint(x: 100, y: 200),
+            attemptID: .attemptB
+        )
+        let failure = VoiceVACFailure(code: .noPlayableMedia, message: "Stale")
+
+        let afterRejection = VoiceVACReducer.reduce(
+            state: retracting,
+            action: .targetRejected(failure, attemptID: .attemptA)
+        )
+        #expect(afterRejection.state == retracting)
+
+        let completed = VoiceVACReducer.reduce(
+            state: afterRejection.state,
+            action: .retractionCompleted
+        )
+        #expect(completed.state == .idle)
+        #expect(completed.effects.isEmpty)
     }
 
     @Test("primary button pauses and resumes an active capture")
@@ -137,7 +239,8 @@ struct VoiceVACReducerTests {
         let target = VideoTarget.fixture
         let transcribing = VoiceVACState(
             phase: .transcribing,
-            target: target
+            target: target,
+            attemptID: .attemptA
         )
 
         let paused = VoiceVACReducer.reduce(
@@ -159,10 +262,14 @@ struct VoiceVACReducerTests {
     func dragActionsMoveNozzle() {
         let began = VoiceVACReducer.reduce(
             state: .idle,
-            action: .beginNozzleDrag(at: CGPoint(x: -220, y: 480))
+            action: .beginNozzleDrag(
+                at: CGPoint(x: -220, y: 480),
+                attemptID: .attemptA
+            )
         )
         #expect(began.state.phase == .dragging)
         #expect(began.state.nozzleGlobalPoint == CGPoint(x: -220, y: 480))
+        #expect(began.state.attemptID == .attemptA)
 
         let moved = VoiceVACReducer.reduce(
             state: began.state,
@@ -177,12 +284,15 @@ struct VoiceVACReducerTests {
         let tabAudioTarget = VideoTarget.fixture(kind: .tabAudio, canDirectPlay: false)
         let dragging = VoiceVACReducer.reduce(
             state: .idle,
-            action: .beginNozzleDrag(at: CGPoint(x: 240, y: 180))
+            action: .beginNozzleDrag(
+                at: CGPoint(x: 240, y: 180),
+                attemptID: .attemptA
+            )
         )
 
         let detected = VoiceVACReducer.reduce(
             state: dragging.state,
-            action: .targetDetected(tabAudioTarget)
+            action: .targetDetected(tabAudioTarget, attemptID: .attemptA)
         )
         #expect(detected.state.phase == .tabAudioOnly)
         #expect(detected.state.target == tabAudioTarget)
@@ -197,7 +307,7 @@ struct VoiceVACReducerTests {
 
         let ready = VoiceVACReducer.reduce(
             state: prematurePress.state,
-            action: .targetResolved(tabAudioTarget)
+            action: .targetResolved(tabAudioTarget, attemptID: .attemptA)
         )
         #expect(ready.state.phase == .ready)
         #expect(ready.state.target == tabAudioTarget)
@@ -217,7 +327,8 @@ struct VoiceVACReducerTests {
         let capturing = VoiceVACState(
             phase: .transcribing,
             nozzleGlobalPoint: CGPoint(x: 400, y: 300),
-            target: target
+            target: target,
+            attemptID: .attemptA
         )
 
         let previewed = VoiceVACReducer.reduce(
@@ -257,7 +368,8 @@ struct VoiceVACReducerTests {
             phase: phase,
             nozzleGlobalPoint: CGPoint(x: 400, y: 300),
             target: .fixture,
-            transcriptPreview: "new session"
+            transcriptPreview: "new session",
+            attemptID: .attemptA
         )
 
         let transition = VoiceVACReducer.reduce(
@@ -283,7 +395,8 @@ struct VoiceVACReducerTests {
             phase: phase,
             nozzleGlobalPoint: CGPoint(x: 400, y: 300),
             target: .fixture,
-            transcriptPreview: "new session"
+            transcriptPreview: "new session",
+            attemptID: .attemptA
         )
 
         let transition = VoiceVACReducer.reduce(
@@ -304,11 +417,11 @@ struct VoiceVACReducerTests {
         let target = VideoTarget.fixture
         let failure = VoiceVACFailure(code: .captureDenied, message: "Denied")
         let actions: [VoiceVACAction] = [
-            .beginNozzleDrag(at: .zero),
+            .beginNozzleDrag(at: .zero, attemptID: .attemptA),
             .moveNozzle(to: CGPoint(x: 1, y: 2)),
-            .targetDetected(target),
-            .targetResolved(target),
-            .targetRejected(failure),
+            .targetDetected(target, attemptID: .attemptA),
+            .targetResolved(target, attemptID: .attemptA),
+            .targetRejected(failure, attemptID: .attemptA),
             .primaryButtonPressed,
             .transcriptPreviewChanged("preview"),
             .captureCompleted,
@@ -327,21 +440,29 @@ private extension VideoTarget {
     static let fixture = fixture()
 
     static func fixture(
+        id: String = "target-A",
         kind: Kind = .htmlMedia,
+        frameID: Int = 0,
+        documentID: String = "document-A",
         canDirectPlay: Bool = true
     ) -> VideoTarget {
         VideoTarget(
-            id: "target-A",
+            id: id,
             kind: kind,
             tag: kind == .htmlMedia ? .video : nil,
-            frameID: 0,
-            documentID: "document-A",
+            frameID: frameID,
+            documentID: documentID,
             viewportRect: CGRect(x: 100, y: 120, width: 640, height: 360),
             screenRect: CGRect(x: 300, y: 220, width: 640, height: 360),
             activationPoint: CGPoint(x: 420, y: 280),
             canDirectPlay: canDirectPlay
         )
     }
+}
+
+private extension UUID {
+    static let attemptA = UUID(uuidString: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA")!
+    static let attemptB = UUID(uuidString: "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB")!
 }
 
 private extension VoiceVACPhase {

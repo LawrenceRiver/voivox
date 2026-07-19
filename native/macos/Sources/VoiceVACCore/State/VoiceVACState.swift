@@ -1,6 +1,8 @@
 import CoreGraphics
 import Foundation
 
+public typealias VoiceVACAttemptID = UUID
+
 public enum VoiceVACPhase: String, Codable, Sendable {
     case idle, dragging, targetDetected, tabAudioOnly, ready
     case transcribing, paused, completed, retracting, warningYellow
@@ -142,30 +144,33 @@ public struct VoiceVACState: Codable, Equatable, Sendable {
     public var target: VideoTarget?
     public var transcriptPreview: String
     public var failure: VoiceVACFailure?
+    public var attemptID: VoiceVACAttemptID?
 
     public init(
         phase: VoiceVACPhase = .idle,
         nozzleGlobalPoint: CGPoint? = nil,
         target: VideoTarget? = nil,
         transcriptPreview: String = "",
-        failure: VoiceVACFailure? = nil
+        failure: VoiceVACFailure? = nil,
+        attemptID: VoiceVACAttemptID? = nil
     ) {
         self.phase = phase
         self.nozzleGlobalPoint = nozzleGlobalPoint
         self.target = target
         self.transcriptPreview = transcriptPreview
         self.failure = failure
+        self.attemptID = attemptID
     }
 
     public static let idle = VoiceVACState()
 }
 
 public enum VoiceVACAction: Equatable, Sendable {
-    case beginNozzleDrag(at: CGPoint)
+    case beginNozzleDrag(at: CGPoint, attemptID: VoiceVACAttemptID)
     case moveNozzle(to: CGPoint)
-    case targetDetected(VideoTarget)
-    case targetResolved(VideoTarget)
-    case targetRejected(VoiceVACFailure)
+    case targetDetected(VideoTarget, attemptID: VoiceVACAttemptID)
+    case targetResolved(VideoTarget, attemptID: VoiceVACAttemptID)
+    case targetRejected(VoiceVACFailure, attemptID: VoiceVACAttemptID)
     case primaryButtonPressed
     case transcriptPreviewChanged(String)
     case captureCompleted
