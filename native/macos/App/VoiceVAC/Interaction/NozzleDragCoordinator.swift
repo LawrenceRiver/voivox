@@ -132,18 +132,8 @@ final class NozzleDragCoordinator: NSObject, NSDraggingSource {
             tangent
         )
         guard let hoseSession else { return }
-        let configuration = hoseSession.rod.configuration
-        let length = min(
-            configuration.maximumActiveLength,
-            max(configuration.naturalSegmentLength, Double(distance) * 1.06)
-        )
         do {
-            try hoseSession.updateDeployment(
-                tipGlobalPoint: point,
-                activeLength: length,
-                orientation: simd_quatd(angle: .pi / 2, axis: SIMD3(0, 0, 1))
-            )
-            try hoseSession.step(deltaTime: 1.0 / 60.0)
+            try hoseSession.deployVisual(toward: point)
             lastSimulationError = nil
         } catch {
             lastSimulationError = error

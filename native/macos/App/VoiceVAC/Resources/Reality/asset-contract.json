@@ -35,16 +35,16 @@
   ],
   "exports": {
     "VoiceVACDevice.usdz": {
-      "byteCount": 424547,
-      "sha256": "e8d118a93939687e6e22171f4b209559375767588b16ccb3a1634d245e35c988"
+      "byteCount": 424560,
+      "sha256": "3fc1bd0cb8e4d6387713905bcb2b51084eb4fdb21176bd9226df82852bf8bf79"
     },
     "VoiceVACHose.meshbin": {
       "byteCount": 814808,
-      "sha256": "6187f90d0708f264064fdd8093e87f314fa193770da7dafa22904e358ac5ffb9"
+      "sha256": "804957206485e17aa47a9ce0c40fb9e75679b62efb8c692a235d869fd6bc767b"
     },
     "VoiceVACHose.usdz": {
       "byteCount": 830433,
-      "sha256": "ef377d1ab1cf7eab0936e89271ac1409694dc86c292c35362fab3733c2966726"
+      "sha256": "bbf2dfa7eff0525bd994a3a53ee5977493852490616b1ebc55ef8e00ab2c26f2"
     }
   },
   "hoseRuntime": {
@@ -95,7 +95,7 @@
       "matrixLayout": "columnMajor4x4",
       "maxInfluencesPerVertex": 2,
       "normalComponentType": "float32",
-      "payloadSHA256": "3e915f4757e7f0e24a2cf0d4b2a9665a69d0158a075c563f892ffa91455a7bbe",
+      "payloadSHA256": "823fcc33be3b6513da3f2daa049236019185295559b728a79152c529abfea562",
       "positionComponentType": "float32",
       "schema": "VoiceVACHoseMesh",
       "sections": {
@@ -110,7 +110,7 @@
         "positionsOffset": 160,
         "textureCoordinatesOffset": 210544
       },
-      "sha256": "6187f90d0708f264064fdd8093e87f314fa193770da7dafa22904e358ac5ffb9",
+      "sha256": "804957206485e17aa47a9ce0c40fb9e75679b62efb8c692a235d869fd6bc767b",
       "textureCoordinateComponentType": "float32",
       "version": 1,
       "vertexCount": 8766
@@ -754,8 +754,8 @@
     "weightedVertexCount": 8766
   },
   "sourceHashes": {
-    "build_voice_vac.py": "14987a9e1566c1a736b73f61fefd634324d434f22c3706d5ad1da6e370d19ace",
-    "voice-vac-machine.blend": "83690f64deca629cb11149735474a4e7d4fa93cb08665939206d43a6f0de6395"
+    "build_voice_vac.py": "f89cb9660a5b817a28edb7d725e0c9481e8a4e4c1be855eab3fc894b450168e9",
+    "voice-vac-machine.blend": "6bf7b79bedc703234ff25a17f5a96ca3f56de9d2c34665c83c0acbacf988ad4a"
   },
   "units": {
     "linear": "meter",

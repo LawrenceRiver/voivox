@@ -15,6 +15,7 @@ release/
 native/macos/.build/
 native/macos/.derived/
 native/macos/build/
+native/macos/build-debug/
 native/macos/App/build/
 native/asr/__pycache__/
 native/macos/App/VoiceVAC.xcodeproj/

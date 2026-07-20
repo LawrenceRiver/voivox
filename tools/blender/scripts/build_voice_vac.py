@@ -178,11 +178,14 @@ def build_materials() -> dict[str, bpy.types.Material]:
         ),
         "MAT_PEARL_RIBBED": create_material(
             "MAT_PEARL_RIBBED",
-            (0.82, 0.80, 0.735, 1.0),
+            # The bellows must read as warm white plastic at desktop scale.
+            # A darker beige looks elegant in Blender but turns into black
+            # stripes when only the ridge valleys are visible in Metal.
+            (0.93, 0.91, 0.84, 1.0),
             metallic=0.0,
-            roughness=0.34,
-            coat_weight=0.20,
-            coat_roughness=0.22,
+            roughness=0.38,
+            coat_weight=0.16,
+            coat_roughness=0.26,
             subsurface_weight=0.018,
             handmade_bump=0.075,
         ),

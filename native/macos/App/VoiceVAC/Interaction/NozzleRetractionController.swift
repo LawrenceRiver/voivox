@@ -46,7 +46,7 @@ final class NozzleRetractionController {
         self.hoseSession = hoseSession
         self.dockPoint = dockPoint
         self.minimumActiveLength = minimumActiveLength
-            ?? hoseSession?.rod.configuration.naturalSegmentLength
+            ?? hoseSession?.stowedActiveLength
             ?? HoseConfiguration.voiceVAC.naturalSegmentLength
         self.retractionSpeed = max(retractionSpeed, 1)
         self.effectHandler = effectHandler
@@ -56,10 +56,12 @@ final class NozzleRetractionController {
         guard !isRetracting else { return }
         let point = providedPose?.nozzlePoint ?? store.state.nozzleGlobalPoint ?? dockPoint
         let distance = Double(hypot(point.x - dockPoint.x, point.y - dockPoint.y))
+        let activeLength = hoseSession?.rod.activeLength
+            ?? max(minimumActiveLength, distance * 1.06)
         let pose = providedPose ?? NozzleRetractionPose(
             nozzlePoint: point,
             hoseTangent: tangent(from: dockPoint, to: point),
-            activeLength: max(minimumActiveLength, distance * 1.06),
+            activeLength: activeLength,
             mouthRotation: point == dockPoint ? 0 : .pi / 2
         )
 
@@ -86,23 +88,32 @@ final class NozzleRetractionController {
         currentFrame = frame
         store.send(.moveNozzle(to: frame.nozzlePoint))
 
+        let reachesDock = progress >= 1 &&
+            hypot(frame.nozzlePoint.x - dockPoint.x, frame.nozzlePoint.y - dockPoint.y) <= 0.001 &&
+            abs(frame.mouthRotation) <= 0.001 &&
+            abs(frame.activeLength - minimumActiveLength) <= 0.001
+
         if let hoseSession {
-            try hoseSession.updateDeployment(
-                tipGlobalPoint: frame.nozzlePoint,
-                activeLength: frame.activeLength,
-                orientation: simd_quatd(
-                    angle: Double(frame.mouthRotation),
-                    axis: SIMD3(0, 0, 1)
+            if reachesDock {
+                try hoseSession.restoreDockedPose()
+            } else {
+                try hoseSession.updateDeployment(
+                    tipGlobalPoint: frame.nozzlePoint,
+                    activeLength: frame.activeLength,
+                    orientation: simd_quatd(
+                        angle: Double(frame.mouthRotation),
+                        axis: SIMD3(0, 0, 1)
+                    )
                 )
-            )
-            try hoseSession.step(deltaTime: min(max(deltaTime, 1.0 / 240.0), 1.0 / 30.0))
+                // Retraction changes both material length and the endpoint pin every
+                // frame. `updateDeployment` regenerates the XPBD rest bridge for
+                // that exact pose; a second Verlet integration against the prior,
+                // longer topology can exceed the angular safety limit on the first
+                // shrink frame. The screen-frame interpolation is the motion here.
+            }
         }
 
-        if progress >= 1,
-           hypot(frame.nozzlePoint.x - dockPoint.x, frame.nozzlePoint.y - dockPoint.y) <= 0.001,
-           abs(frame.mouthRotation) <= 0.001,
-           abs(frame.activeLength - minimumActiveLength) <= 0.001
-        {
+        if reachesDock {
             isRetracting = false
             store.send(.retractionCompleted)
         }

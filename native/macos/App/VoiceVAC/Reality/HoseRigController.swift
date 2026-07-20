@@ -22,12 +22,31 @@ final class HoseRenderSnapshot: Sendable {
     let jointNames: [String]
     let jointMatrices: [simd_float4x4]
     let correctiveWeights: SIMD2<Float>
+    /// The unused mechanical reservoir is intentionally collapsed by the
+    /// XPBD topology. Rendering that collapsed geometry produces a hard,
+    /// striped knot, so Metal clips it before it reaches the desktop.
+    let activeMaterialStart: Float
+    /// World-space XPBD path, in metres. Metal turns this into the live
+    /// accordion mesh so a variable-length hose never collapses a fixed skin.
+    let centerline: [SIMD3<Float>]
+    /// A docked Voice VAC stores its hose inside the capsule. The external
+    /// game mesh appears only after the user begins pulling the mouth out.
+    let showsExternalHose: Bool
 
-    init(jointMatrices: [simd_float4x4], correctiveWeights: SIMD2<Float>) {
+    init(
+        jointMatrices: [simd_float4x4],
+        correctiveWeights: SIMD2<Float>,
+        activeMaterialStart: Float = 0,
+        centerline: [SIMD3<Float>] = [],
+        showsExternalHose: Bool = true
+    ) {
         precondition(jointMatrices.count == HoseRigSnapshot.jointCount)
         jointNames = Self.jointNames
         self.jointMatrices = jointMatrices
         self.correctiveWeights = correctiveWeights
+        self.activeMaterialStart = min(max(activeMaterialStart, 0), 1)
+        self.centerline = centerline
+        self.showsExternalHose = showsExternalHose
     }
 }
 
@@ -38,7 +57,12 @@ struct HoseRigController: Sendable {
         self.pointsPerMeter = pointsPerMeter
     }
 
-    func makeRenderSnapshot(from rig: HoseRigSnapshot) throws -> HoseRenderSnapshot {
+    func makeRenderSnapshot(
+        from rig: HoseRigSnapshot,
+        activeMaterialStart: Float = 0,
+        centerline: [SIMD3<Float>] = [],
+        showsExternalHose: Bool = true
+    ) throws -> HoseRenderSnapshot {
         guard pointsPerMeter.isFinite, pointsPerMeter > 0 else {
             throw HoseRigControllerError.invalidPointsPerMeter
         }
@@ -74,7 +98,10 @@ struct HoseRigController: Sendable {
 
         return HoseRenderSnapshot(
             jointMatrices: matrices,
-            correctiveWeights: correctiveWeights(for: rig)
+            correctiveWeights: correctiveWeights(for: rig),
+            activeMaterialStart: activeMaterialStart,
+            centerline: centerline,
+            showsExternalHose: showsExternalHose
         )
     }
 

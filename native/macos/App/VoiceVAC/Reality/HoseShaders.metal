@@ -4,7 +4,7 @@ using namespace metal;
 struct HoseFrameUniforms {
     float4x4 worldToClip;
     float2 correctiveWeights;
-    float2 padding;
+    float2 activeMaterialRange;
     float4 baseColor;
     float4 material;
     float4 lightDirection;
@@ -14,6 +14,7 @@ struct HoseVarying {
     float4 position [[position]];
     float3 normal;
     float2 uv;
+    float materialCoordinate;
 };
 
 vertex HoseVarying voiceVacHoseVertex(
@@ -42,12 +43,20 @@ vertex HoseVarying voiceVacHoseVertex(
     );
     float3 n = normalize((normal0 * normals[id]) * jw.x
                        + (normal1 * normals[id]) * jw.y);
-    return { frame.worldToClip * world, n, uvs[id] };
+    float materialCoordinate = saturate(uvs[id].y * frame.activeMaterialRange.y);
+    return { frame.worldToClip * world, n, uvs[id], materialCoordinate };
 }
 
 fragment float4 voiceVacHoseFragment(
     HoseVarying in [[stage_in]],
     constant HoseFrameUniforms &frame [[buffer(0)]]) {
+    // The inactive reservoir is topologically folded at the root while a
+    // short docked hose is shown. It is not a visual object: discard it so
+    // the user sees a few soft accordion folds, never a dark drill-bit knot.
+    if (in.materialCoordinate < frame.activeMaterialRange.x) {
+        discard_fragment();
+    }
+
     constexpr float pi = 3.14159265359;
     float3 n = normalize(in.normal);
     float3 l = normalize(frame.lightDirection.xyz);
@@ -92,10 +101,14 @@ fragment float4 voiceVacHoseFragment(
     // angle-dependent Fresnel before adding the coat lobe.
     float baseTransmission = 1.0 - coatWeight * coatFresnel;
     float3 layeredBRDF = (diffuse + specular) * baseTransmission + coat;
-    constexpr float3 incidentRadiance = float3(1.35);
+    constexpr float3 incidentRadiance = float3(1.20, 1.17, 1.10);
     float3 direct = layeredBRDF * noL * incidentRadiance;
     float skyVisibility = saturate(n.y * 0.5 + 0.5);
-    float3 ambient = frame.baseColor.rgb * mix(0.035, 0.12, skyVisibility)
+    // The overlay has no HDR scene behind it to bounce light back into a
+    // narrow fold. Model that missing room as a broad warm studio fill: the
+    // valleys stay pearl-white while the actual mesh and PBR lobes still give
+    // every accordion ridge its depth.
+    float3 ambient = frame.baseColor.rgb * mix(0.42, 0.62, skyVisibility)
         * (1.0 - metallic * 0.65);
     float3 color = direct + ambient;
     float alpha = frame.baseColor.a;

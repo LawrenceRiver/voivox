@@ -38,7 +38,7 @@ final class PanelConfigurationTests: XCTestCase {
         }
     }
 
-    func testPanelsUseExactSizesAndStrictLevelsBelowModalPanel() {
+    func testPanelsUseExactSizesAndHoseRendersAboveTheGlassBelowTheMouth() {
         let capsule = CapsulePanel(frame: capsuleFrame)
         let nozzle = NozzleHitPanel(frame: nozzleFrame)
         let transcript = TranscriptPanel(frame: transcriptFrame)
@@ -51,10 +51,11 @@ final class PanelConfigurationTests: XCTestCase {
         XCTAssertEqual(capsule.frame.size, CGSize(width: 406, height: 116))
         XCTAssertEqual(nozzle.frame.size, CGSize(width: 96, height: 96))
         XCTAssertEqual(transcript.frame.size, CGSize(width: 318, height: 74))
-        XCTAssertEqual(hose.level.rawValue, 3)
+        XCTAssertGreaterThan(hose.level.rawValue, capsule.level.rawValue)
+        XCTAssertLessThan(hose.level.rawValue, nozzle.level.rawValue)
         XCTAssertEqual(capsule.level.rawValue, 4)
-        XCTAssertEqual(nozzle.level.rawValue, 5)
-        XCTAssertEqual(transcript.level.rawValue, 6)
+        XCTAssertEqual(nozzle.level.rawValue, 6)
+        XCTAssertEqual(transcript.level.rawValue, 7)
         XCTAssertEqual(urlInput.level.rawValue, 7)
         XCTAssertLessThan(urlInput.level.rawValue, NSWindow.Level.modalPanel.rawValue)
         XCTAssertNotEqual(hose.level, NSWindow.Level.screenSaver)
@@ -72,6 +73,23 @@ final class PanelConfigurationTests: XCTestCase {
         for panel in panels where panel !== hose {
             XCTAssertFalse(panel.ignoresMouseEvents, "\(type(of: panel))")
         }
+    }
+
+    func testDeployedNozzleUsesTheWholeRemotePresentationViewport() {
+        let nozzle = NozzleHitPanel(frame: nozzleFrame)
+
+        nozzle.setDeployed(
+            center: CGPoint(x: 400, y: 280),
+            hoseTangent: CGVector(dx: 1, dy: 0),
+            showsCloseButton: true
+        )
+
+        // The remote duckbill is a deliberate 3D object, not a tiny icon
+        // stranded in a larger transparent hit panel. Its RealityKit viewport
+        // must grow with the deployed panel so the mouth remains readable at
+        // desktop scale and usable as a drag target.
+        XCTAssertEqual(nozzle.nozzleRealityView.frame.size, NozzleHitPanel.deployedSize)
+        XCTAssertEqual(nozzle.interactionView.frame.size, NozzleHitPanel.deployedSize)
     }
 
     func testURLAndTranscriptHaveDeliberateKeyButNeverMainBehavior() {

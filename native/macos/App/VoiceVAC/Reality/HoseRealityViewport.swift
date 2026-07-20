@@ -182,14 +182,28 @@ enum HoseMetalRendererError: Error, LocalizedError {
 private struct HoseFrameUniforms {
     var worldToClip: simd_float4x4
     var correctiveWeights: SIMD2<Float>
-    var padding: SIMD2<Float> = .zero
+    /// x is the active material start (0...1); y maps the exported UV range
+    /// back to that material coordinate. Keeping this in the frame lets the
+    /// same game mesh expand across a desktop without showing its collapsed
+    /// internal reservoir.
+    var activeMaterialRange: SIMD2<Float>
     var baseColor: SIMD4<Float>
     var material: SIMD4<Float>
     var lightDirection: SIMD4<Float>
 }
 
+/// GPU resources for a single live, variable-length bellows mesh. The source
+/// Blender mesh remains loaded for material/contract validation; this buffer
+/// set is the runtime topology built from the XPBD path.
+private struct LiveBellowsBuffers {
+    let vertexBuffers: [Int: any MTLBuffer]
+    let indexBuffer: any MTLBuffer
+    let indexCount: Int
+}
+
 final class HoseMetalRenderer: NSObject, MTKViewDelegate {
     private static let pointsPerMeter: Float = 1_000
+    private let device: any MTLDevice
     private let commandQueue: any MTLCommandQueue
     private let pipeline: any MTLRenderPipelineState
     private let depthState: any MTLDepthStencilState
@@ -197,10 +211,12 @@ final class HoseMetalRenderer: NSObject, MTKViewDelegate {
     private let indexCount: Int
     private let inverseBindMatrices: [simd_float4x4]
     private let material: HoseMetalAsset.Material
+    private let materialVScale: Float
     private let buffers: [Int: any MTLBuffer]
     private let lock = NSLock()
     private var snapshot: HoseRenderSnapshot
     private var projector: ScreenPointProjector
+    private var liveBellows: LiveBellowsBuffers?
 
     @MainActor
     init(
@@ -213,6 +229,7 @@ final class HoseMetalRenderer: NSObject, MTKViewDelegate {
             throw HoseMetalRendererError.metalUnavailable
         }
         view.device = device
+        self.device = device
         guard let commandQueue = device.makeCommandQueue() else {
             throw HoseMetalRendererError.commandQueueUnavailable
         }
@@ -220,6 +237,8 @@ final class HoseMetalRenderer: NSObject, MTKViewDelegate {
         self.projector = projector
         inverseBindMatrices = asset.inverseBindMatrices
         material = asset.material
+        let maximumMaterialV = asset.textureCoordinates.map(\.y).max() ?? 1
+        materialVScale = 1 / max(maximumMaterialV, 0.000_1)
         indexCount = asset.indices.count
         snapshot = HoseRenderSnapshot(
             jointMatrices: asset.bindMatrices,
@@ -292,7 +311,16 @@ final class HoseMetalRenderer: NSObject, MTKViewDelegate {
     }
 
     func render(_ snapshot: HoseRenderSnapshot) {
-        lock.withLock { self.snapshot = snapshot }
+        // The skeleton asset has a fixed 64-bone reservoir; generating the
+        // tube from the live XPBD path prevents an inactive section from
+        // collapsing into a straight line when the user pulls the mouth.
+        let mesh = snapshot.showsExternalHose
+            ? (try? makeLiveBellows(from: snapshot.centerline))
+            : nil
+        lock.withLock {
+            self.snapshot = snapshot
+            self.liveBellows = mesh
+        }
     }
 
     func updateProjector(_ projector: ScreenPointProjector) {
@@ -307,11 +335,24 @@ final class HoseMetalRenderer: NSObject, MTKViewDelegate {
               let commandBuffer = commandQueue.makeCommandBuffer(),
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass)
         else { return }
-        let state = lock.withLock { (snapshot, projector) }
-        let skinMatrices = zip(state.0.jointMatrices, inverseBindMatrices).map(*)
+        let state = lock.withLock { (snapshot, projector, liveBellows) }
+        guard state.0.showsExternalHose else {
+            encoder.endEncoding()
+            commandBuffer.present(drawable)
+            commandBuffer.commit()
+            return
+        }
+        let useLiveBellows = state.2 != nil
+        let skinMatrices: [simd_float4x4] = useLiveBellows
+            ? Array(repeating: matrix_identity_float4x4, count: 64)
+            : zip(state.0.jointMatrices, inverseBindMatrices).map(*)
         var frame = HoseFrameUniforms(
             worldToClip: state.1.worldToClipMatrix(pointsPerMeter: Self.pointsPerMeter),
             correctiveWeights: state.0.correctiveWeights,
+            activeMaterialRange: SIMD2(
+                useLiveBellows ? 0 : state.0.activeMaterialStart,
+                materialVScale
+            ),
             baseColor: SIMD4(material.baseColor[0], material.baseColor[1], material.baseColor[2], material.baseColor[3]),
             material: SIMD4(material.metallic, material.roughness, material.coatWeight, material.coatRoughness),
             lightDirection: simd_normalize(SIMD4<Float>(-0.35, 0.72, 0.60, 0))
@@ -319,7 +360,13 @@ final class HoseMetalRenderer: NSObject, MTKViewDelegate {
 
         encoder.setRenderPipelineState(pipeline)
         encoder.setDepthStencilState(depthState)
-        for index in 0...6 { encoder.setVertexBuffer(buffers[index], offset: 0, index: index) }
+        for index in 0...6 {
+            encoder.setVertexBuffer(
+                state.2?.vertexBuffers[index] ?? buffers[index],
+                offset: 0,
+                index: index
+            )
+        }
         encoder.setVertexBytes(
             skinMatrices,
             length: skinMatrices.count * MemoryLayout<simd_float4x4>.stride,
@@ -329,14 +376,55 @@ final class HoseMetalRenderer: NSObject, MTKViewDelegate {
         encoder.setFragmentBytes(&frame, length: MemoryLayout<HoseFrameUniforms>.stride, index: 0)
         encoder.drawIndexedPrimitives(
             type: .triangle,
-            indexCount: indexCount,
+            indexCount: state.2?.indexCount ?? indexCount,
             indexType: .uint32,
-            indexBuffer: indexBuffer,
+            indexBuffer: state.2?.indexBuffer ?? indexBuffer,
             indexBufferOffset: 0
         )
         encoder.endEncoding()
         commandBuffer.present(drawable)
         commandBuffer.commit()
+    }
+
+    private func makeLiveBellows(
+        from centerline: [SIMD3<Float>]
+    ) throws -> LiveBellowsBuffers? {
+        let geometry = HoseBellowsGeometry.make(centerline: centerline)
+        guard geometry.indices.count >= 3,
+              !geometry.positions.isEmpty
+        else { return nil }
+
+        func makeBuffer<T>(_ values: [T], _ name: String) throws -> any MTLBuffer {
+            let length = values.count * MemoryLayout<T>.stride
+            let buffer = values.withUnsafeBufferPointer { pointer in
+                pointer.baseAddress.flatMap {
+                    device.makeBuffer(bytes: $0, length: length, options: .storageModeShared)
+                }
+            }
+            guard let buffer else {
+                throw HoseMetalRendererError.bufferCreationFailed(name)
+            }
+            buffer.label = name
+            return buffer
+        }
+
+        let count = geometry.positions.count
+        let joints = Array(repeating: SIMD2<UInt16>(0, 0), count: count)
+        let weights = Array(repeating: SIMD2<Float>(1, 0), count: count)
+        let zeroDeltas = Array(repeating: SIMD3<Float>.zero, count: count)
+        return LiveBellowsBuffers(
+            vertexBuffers: [
+                0: try makeBuffer(geometry.positions, "liveBellows.positions"),
+                1: try makeBuffer(geometry.normals, "liveBellows.normals"),
+                2: try makeBuffer(geometry.textureCoordinates, "liveBellows.uv"),
+                3: try makeBuffer(joints, "liveBellows.joints"),
+                4: try makeBuffer(weights, "liveBellows.weights"),
+                5: try makeBuffer(zeroDeltas, "liveBellows.correctivePositive"),
+                6: try makeBuffer(zeroDeltas, "liveBellows.correctiveNegative"),
+            ],
+            indexBuffer: try makeBuffer(geometry.indices, "liveBellows.indices"),
+            indexCount: geometry.indices.count
+        )
     }
 
 }

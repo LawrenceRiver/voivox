@@ -222,6 +222,15 @@ npm run package:dir --workspace @voivox/desktop
 
 `build:native` writes the small glass capsule to `native/macos/build/Voice VAC.app` and embeds the headless bridge plus Qwen worker. The native bundle resolves a local Node 22 runtime (or `VOICE_VAC_NODE`) to supervise that bridge; the Electron package includes its own Node runtime. No speech API key is required.
 
+### Native hose visual acceptance
+
+The capsule stays at 406 × 116 points. Its corrugated white hose is a Metal-skinned XPBD rig, not a decorative line. Verify the native interaction in this order:
+
+1. Launch the App and confirm a short corrugated white hose is visibly stored at the left nozzle port.
+2. Drag the mouth at least 300 points and confirm that a curved hose remains between the capsule and mouth, with visible slack rather than a taut line.
+3. Drop onto an invalid page area and confirm the yellow warning leaves the hose deployed.
+4. Click the × beside the mouth and confirm it retracts to the same visible stored segment.
+
 ```bash
 npm test
 npm run typecheck

@@ -9,10 +9,10 @@ enum PanelRole: Hashable {
 
     var level: Int {
         switch self {
-        case .hose: 3
+        case .hose: 5
         case .capsule: 4
-        case .nozzle: 5
-        case .transcript: 6
+        case .nozzle: 6
+        case .transcript: 7
         case .urlInput: 7
         }
     }

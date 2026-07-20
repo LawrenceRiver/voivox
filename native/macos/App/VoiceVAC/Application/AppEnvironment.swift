@@ -36,7 +36,10 @@ struct LiveAppEnvironmentFactory: AppEnvironmentFactory {
     func makeEnvironment() -> AppEnvironment {
         let store = VoiceVACStore()
         let hoseRenderSource = HoseRenderSnapshotSource()
-        let hoseRenderSession = HoseRenderSession(source: hoseRenderSource)
+        let hoseRenderSession = HoseRenderSession(
+            source: hoseRenderSource,
+            configuration: Self.hoseConfiguration(for: screenProvider.screens)
+        )
         let deviceController = VoiceVACDeviceInteractionController(loader: realityLoader)
         let liveTransport = VoiceVACURLSessionTransport()
         let liveBridge: VoiceVACDesktopBridge? = if sessionTokenProvider == nil {
@@ -81,6 +84,21 @@ struct LiveAppEnvironmentFactory: AppEnvironmentFactory {
             desktopBridge: liveBridge,
             backendSupervisor: backendSupervisor
         )
+    }
+
+    /// Allocate enough physical hose to cross the current virtual desktop,
+    /// including a small slack reserve. This is calculated from the actual
+    /// arrangement rather than assuming a single 2200-point display.
+    static func hoseConfiguration(for screens: [ScreenDescriptor]) -> HoseConfiguration {
+        guard let desktopFrame = screens.map(\.frame).reduce(nil, { partial, frame in
+            partial?.union(frame) ?? frame
+        }), desktopFrame.width > 0, desktopFrame.height > 0
+        else {
+            return .voiceVAC
+        }
+        let diagonal = hypot(Double(desktopFrame.width), Double(desktopFrame.height))
+        return (try? HoseConfiguration.voiceVAC(requiredDisplayDiagonal: diagonal))
+            ?? .voiceVAC
     }
 }
 

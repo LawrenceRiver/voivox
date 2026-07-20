@@ -51,7 +51,11 @@ final class NozzleHitPanel: NSPanel, PanelControlling {
         closeButton.setAccessibilityLabel("Retract nozzle")
         root.addSubview(closeButton)
         contentView = root
-        layoutContent(nozzleCenter: CGPoint(x: frame.width / 2, y: frame.height / 2), tangent: CGVector(dx: 0, dy: 1))
+        layoutContent(
+            nozzleCenter: CGPoint(x: frame.width / 2, y: frame.height / 2),
+            tangent: CGVector(dx: 0, dy: 1),
+            presentationSize: Self.dockedSize
+        )
     }
 
     override var canBecomeKey: Bool { false }
@@ -70,7 +74,8 @@ final class NozzleHitPanel: NSPanel, PanelControlling {
         )
         layoutContent(
             nozzleCenter: CGPoint(x: size.width / 2, y: size.height / 2),
-            tangent: hoseTangent
+            tangent: hoseTangent,
+            presentationSize: size
         )
         closeButton.isHidden = !showsCloseButton
     }
@@ -79,17 +84,22 @@ final class NozzleHitPanel: NSPanel, PanelControlling {
         setFrame(frame, display: true)
         layoutContent(
             nozzleCenter: CGPoint(x: frame.width / 2, y: frame.height / 2),
-            tangent: CGVector(dx: 0, dy: 1)
+            tangent: CGVector(dx: 0, dy: 1),
+            presentationSize: Self.dockedSize
         )
         closeButton.isHidden = true
     }
 
-    private func layoutContent(nozzleCenter: CGPoint, tangent: CGVector) {
+    private func layoutContent(
+        nozzleCenter: CGPoint,
+        tangent: CGVector,
+        presentationSize: CGSize
+    ) {
         let nozzleFrame = CGRect(
-            x: nozzleCenter.x - Self.dockedSize.width / 2,
-            y: nozzleCenter.y - Self.dockedSize.height / 2,
-            width: Self.dockedSize.width,
-            height: Self.dockedSize.height
+            x: nozzleCenter.x - presentationSize.width / 2,
+            y: nozzleCenter.y - presentationSize.height / 2,
+            width: presentationSize.width,
+            height: presentationSize.height
         )
         nozzleRealityView.frame = nozzleFrame
         interactionView.frame = nozzleFrame
@@ -138,7 +148,9 @@ final class NozzleInteractionHitView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard !startedDragging, event.clickCount < 2, let interactionRuntime else { return }
+        guard event.clickCount < 2, let interactionRuntime else { return }
+        interactionRuntime.prepareVisualDeployment(at: NSEvent.mouseLocation)
+        guard !startedDragging else { return }
         startedDragging = true
         _ = try? interactionRuntime.beginNozzleDrag(
             from: self,

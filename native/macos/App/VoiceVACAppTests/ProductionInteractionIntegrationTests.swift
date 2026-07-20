@@ -98,6 +98,31 @@ final class ProductionInteractionIntegrationTests: XCTestCase {
         XCTAssertEqual(capsule.glass.physicalButton.accessibilityIdentifier(), "voice-vac-physical-button")
     }
 
+    func testLiveHoseConfigurationReachesTheFullVirtualDesktopDiagonal() {
+        let screens = [
+            ScreenDescriptor(
+                id: ScreenID(rawValue: 1),
+                frame: CGRect(x: -1_920, y: 0, width: 1_920, height: 1_080),
+                visibleFrame: CGRect(x: -1_920, y: 24, width: 1_920, height: 1_056),
+                backingScaleFactor: 2
+            ),
+            ScreenDescriptor(
+                id: ScreenID(rawValue: 2),
+                frame: CGRect(x: 0, y: 0, width: 2_560, height: 1_440),
+                visibleFrame: CGRect(x: 0, y: 24, width: 2_560, height: 1_416),
+                backingScaleFactor: 2
+            ),
+        ]
+
+        let configuration = LiveAppEnvironmentFactory.hoseConfiguration(for: screens)
+        let desktopDiagonal = hypot(4_480.0, 1_440.0)
+
+        XCTAssertGreaterThanOrEqual(
+            configuration.maximumActiveLength,
+            desktopDiagonal * 1.08
+        )
+    }
+
     func testMissingArmedChromeSessionShowsEnglishWarningAndCreatesNoFakeToken() {
         let store = VoiceVACStore()
         let runtime = VoiceVACInteractionRuntime(
@@ -113,6 +138,32 @@ final class ProductionInteractionIntegrationTests: XCTestCase {
         XCTAssertEqual(store.state.phase, .warningYellow)
         XCTAssertEqual(store.state.failure?.message, "Arm a Chrome video first")
         XCTAssertNil(store.state.attemptID)
+    }
+
+    func testVisualDeploymentBeginsBeforeChromeDragAuthorization() throws {
+        let source = HoseRenderSnapshotSource()
+        let session = HoseRenderSession(source: source, seed: 93)
+        let dockFrame = CGRect(x: 24, y: 40, width: 96, height: 96)
+        try session.dock(in: dockFrame)
+        let presenter = InteractionPresenterSpy()
+        let runtime = VoiceVACInteractionRuntime(
+            store: VoiceVACStore(),
+            hoseSession: session,
+            deviceController: VoiceVACDeviceInteractionController(),
+            sessionTokenProvider: UnavailableCrossWindowSessionTokenProvider(),
+            dockPoint: CGPoint(x: dockFrame.midX, y: dockFrame.midY)
+        )
+        runtime.presenter = presenter
+
+        runtime.prepareVisualDeployment(at: CGPoint(x: 420, y: 260))
+
+        let root = try XCTUnwrap(session.rootGlobalPoint)
+        let span = hypot(420 - root.x, 260 - root.y)
+        XCTAssertGreaterThanOrEqual(session.rod.activeLength, span * 1.18)
+        XCTAssertEqual(presenter.nozzleMoves.last?.center, CGPoint(x: 420, y: 260))
+        XCTAssertTrue(presenter.nozzleMoves.last?.showsCloseButton ?? false)
+        XCTAssertEqual(runtime.store.state.phase, .idle)
+        XCTAssertNotNil(source.latest)
     }
 
     func testInjectedArmedSessionProvidesTheExactChromeToken() throws {

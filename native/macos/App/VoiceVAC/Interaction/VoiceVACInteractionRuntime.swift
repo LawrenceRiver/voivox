@@ -139,6 +139,29 @@ final class VoiceVACInteractionRuntime {
         }
     }
 
+    /// Start the visible machine response before macOS begins a pasteboard drag
+    /// or Chrome confirms an armed tab. This keeps the hose under the user's
+    /// hand even when the eventual target becomes a yellow warning.
+    func prepareVisualDeployment(at point: CGPoint) {
+        frameClock.stop()
+        let distance = hypot(point.x - dockPoint.x, point.y - dockPoint.y)
+        let tangent = distance > 0
+            ? CGVector(
+                dx: (point.x - dockPoint.x) / distance,
+                dy: (point.y - dockPoint.y) / distance
+            )
+            : CGVector(dx: 0, dy: 1)
+        try? hoseSession?.deployVisual(toward: point)
+        try? deviceController.applyNozzleDragProgress(
+            min(max(distance / 120, 0), 1)
+        )
+        presenter?.moveNozzlePanel(
+            center: point,
+            hoseTangent: tangent,
+            showsCloseButton: true
+        )
+    }
+
     @discardableResult
     func beginNozzleDrag(
         from hostView: NSView,

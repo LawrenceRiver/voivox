@@ -175,6 +175,38 @@ final class NozzleInteractionTests: XCTestCase {
         XCTAssertEqual(store.state.phase, .idle)
     }
 
+    func testRetractionRestoresVisibleStowedHoseInsteadOfOneSegment() async throws {
+        let source = HoseRenderSnapshotSource()
+        let session = HoseRenderSession(source: source, seed: 92)
+        let dockFrame = CGRect(x: 0, y: 0, width: 96, height: 96)
+        try session.dock(in: dockFrame)
+        let store = VoiceVACStore(state: VoiceVACState(
+            phase: .ready,
+            nozzleGlobalPoint: CGPoint(x: 320, y: 48)
+        ))
+        // Mirror the real interaction path: retraction begins after the hose
+        // has already been deployed to the visible mouth position.
+        try session.deployVisual(toward: CGPoint(x: 320, y: 48))
+        let controller = NozzleRetractionController(
+            store: store,
+            hoseSession: session,
+            dockPoint: CGPoint(x: 48, y: 48),
+            retractionSpeed: 1_200
+        )
+
+        try await controller.requestRetraction()
+        while controller.isRetracting {
+            _ = try await controller.advance(deltaTime: 1.0 / 60.0)
+        }
+
+        XCTAssertEqual(store.state.phase, .idle)
+        XCTAssertGreaterThan(
+            session.rod.activeLength,
+            session.rod.configuration.naturalSegmentLength * 2.5
+        )
+        XCTAssertNotNil(source.latest)
+    }
+
     func testCloseButtonFollowsHoseTangentFortyPointsAboveNozzle() {
         let nozzle = CGPoint(x: 200, y: 100)
         let close = NozzleRetractionController.closeButtonPoint(
