@@ -37,8 +37,9 @@ REQUIRED_OBJECTS = {
 }
 REQUIRED_JOINTS = [f"VAC_HOSE_JOINT_{index:02d}" for index in range(64)]
 REQUIRED_MATERIALS = {
+    "MAT_PEARL_PLASTIC",
+    "MAT_PEARL_RIBBED",
     "MAT_TOY_IVORY",
-    "MAT_TOY_IVORY_RIBBED",
     "MAT_CHARCOAL_RUBBER",
     "MAT_BUTTON_RED",
     "MAT_MOUTH_DARK",
@@ -66,7 +67,9 @@ MESH_BINARY_ENDIAN_MARKER = 0x01020304
 EXPECTED_SCHEMA_VERSION = 2
 EXPECTED_PREVIEW_SIZE = (1800, 1100)
 EXPECTED_DOCK_TRANSLATION = (-0.132, -0.037, 0.002)
-EXPECTED_DOCK_ROTATION = (math.sqrt(0.5), 0.0, math.sqrt(0.5), 0.0)
+# The Y quarter-turn presents the narrow vacuum-head silhouette while the Z
+# half-turn reverses the authored negative-Y body axis from down to up.
+EXPECTED_DOCK_ROTATION = (0.0, -math.sqrt(0.5), 0.0, math.sqrt(0.5))
 EXPECTED_BUTTON_UP_TRANSLATION = (0.128, 0.006, 0.002)
 EXPECTED_BUTTON_TRAVEL_METERS = 0.009
 REQUIRED_NAMED_POSES = {
@@ -950,8 +953,12 @@ def validate_usdz(check: Validation, path: Path, required_names: set[str], contr
                     "VoiceVACDevice.usdz nozzle is not exported at dock-rest scale",
                 )
                 check.require(
-                    triplet_close(usd_triplet(nozzle_block, "xformOp:rotateXYZ"), (0.0, 90.0, 0.0), tolerance=1.0e-3),
-                    "VoiceVACDevice.usdz nozzle is not vertically docked",
+                    triplet_close(
+                        usd_triplet(nozzle_block, "xformOp:rotateXYZ"),
+                        (180.0, 90.0, 0.0),
+                        tolerance=1.0e-3,
+                    ),
+                    "VoiceVACDevice.usdz duckbill does not point upward while docked",
                 )
             if button_block is not None:
                 check.require(

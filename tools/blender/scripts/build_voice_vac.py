@@ -28,8 +28,9 @@ from mathutils import Matrix, Vector
 SCHEMA_VERSION = 2
 JOINT_NAMES = [f"VAC_HOSE_JOINT_{index:02d}" for index in range(64)]
 MATERIAL_NAMES = [
+    "MAT_PEARL_PLASTIC",
+    "MAT_PEARL_RIBBED",
     "MAT_TOY_IVORY",
-    "MAT_TOY_IVORY_RIBBED",
     "MAT_CHARCOAL_RUBBER",
     "MAT_BUTTON_RED",
     "MAT_MOUTH_DARK",
@@ -166,6 +167,28 @@ def create_material(
 
 def build_materials() -> dict[str, bpy.types.Material]:
     return {
+        "MAT_PEARL_PLASTIC": create_material(
+            "MAT_PEARL_PLASTIC",
+            (0.91, 0.875, 0.79, 1.0),
+            metallic=0.02,
+            roughness=0.24,
+            coat_weight=0.34,
+            coat_roughness=0.16,
+            subsurface_weight=0.025,
+            handmade_bump=0.055,
+        ),
+        "MAT_PEARL_RIBBED": create_material(
+            "MAT_PEARL_RIBBED",
+            # Keep the accordion body white. The warmer toy ivory belongs to
+            # the detachable vacuum head only.
+            (0.93, 0.91, 0.84, 1.0),
+            metallic=0.0,
+            roughness=0.38,
+            coat_weight=0.16,
+            coat_roughness=0.26,
+            subsurface_weight=0.018,
+            handmade_bump=0.075,
+        ),
         "MAT_TOY_IVORY": create_material(
             "MAT_TOY_IVORY",
             (0.70, 0.64, 0.52, 1.0),
@@ -175,18 +198,6 @@ def build_materials() -> dict[str, bpy.types.Material]:
             coat_roughness=0.19,
             subsurface_weight=0.025,
             handmade_bump=0.055,
-        ),
-        "MAT_TOY_IVORY_RIBBED": create_material(
-            "MAT_TOY_IVORY_RIBBED",
-            # Warm cream must survive the white desktop without becoming a
-            # bright yellow toy or a grey technical conduit.
-            (0.73, 0.68, 0.57, 1.0),
-            metallic=0.0,
-            roughness=0.41,
-            coat_weight=0.14,
-            coat_roughness=0.29,
-            subsurface_weight=0.018,
-            handmade_bump=0.075,
         ),
         "MAT_CHARCOAL_RUBBER": create_material(
             "MAT_CHARCOAL_RUBBER",
@@ -471,7 +482,7 @@ def build_device(
     port = lathe_mesh(
         "VAC_PORT",
         port_profile,
-        materials["MAT_TOY_IVORY"],
+        materials["MAT_PEARL_PLASTIC"],
         collection,
         radial_ripple=0.003,
         ripple_count=24,
@@ -505,7 +516,7 @@ def build_device(
     nozzle.empty_display_type = "ARROWS"
     nozzle.location = DOCK_LOCATION
     nozzle.rotation_mode = "XYZ"
-    nozzle.rotation_euler = (0.0, math.radians(90.0), 0.0)
+    nozzle.rotation_euler = (0.0, math.radians(90.0), math.radians(180.0))
     nozzle["voice_vac_pivot"] = "rotary_collar_center"
     parent(nozzle, device_root)
 
@@ -662,7 +673,7 @@ def build_device(
     ready_light = lathe_mesh(
         "VAC_BUTTON_READY_LIGHT",
         [(-0.021, 0.051), (-0.024, 0.054), (-0.028, 0.054), (-0.031, 0.051)],
-        materials["MAT_TOY_IVORY"],
+        materials["MAT_PEARL_PLASTIC"],
         collection,
         segments=80,
         cap_start=False,
@@ -797,7 +808,7 @@ def build_hose(
         vertices,
         faces,
         uvs,
-        materials["MAT_TOY_IVORY_RIBBED"],
+        materials["MAT_PEARL_RIBBED"],
         collection,
     )
     skin.parent = armature
@@ -879,8 +890,8 @@ def build_actions(device: dict[str, bpy.types.Object], hose: dict[str, bpy.types
         nozzle,
         "VAC_NOZZLE_POSES",
         [
-            (1, DOCK_LOCATION, (0.0, math.radians(90.0), 0.0), Vector((1.0, 1.0, 1.0))),
-            (10, DOCK_LOCATION + Vector((0.0, -0.010, 0.018)), (0.0, math.radians(22.0), 0.0), Vector((1.0, 1.0, 1.0))),
+            (1, DOCK_LOCATION, (0.0, math.radians(90.0), math.radians(180.0)), Vector((1.0, 1.0, 1.0))),
+            (10, DOCK_LOCATION + Vector((0.0, 0.010, 0.018)), (0.0, math.radians(90.0), math.radians(180.0)), Vector((1.0, 1.0, 1.0))),
             (24, tip_point + Vector((0.0, -0.018, 0.0)), (0.0, 0.0, math.radians(-8.0)), Vector((1.0, 1.0, 1.0))),
             (36, tip_point + Vector((0.0, -0.012, 0.0)), (math.radians(4.0), 0.0, math.radians(-8.0)), Vector((1.0, 0.92, 1.04))),
         ],

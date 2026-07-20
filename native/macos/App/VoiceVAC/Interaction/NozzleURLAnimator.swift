@@ -20,7 +20,10 @@ struct NozzleURLAnimationFrame: Equatable {
     let stageProgress: CGFloat
     let translation: CGPoint
     let lift: CGFloat
-    let mouthRotation: CGFloat
+    /// Positive values travel away from the camera, deeper into the desktop.
+    let intoScreenDepth: CGFloat
+    /// Rotates the duckbill around screen X until the mouth faces the user.
+    let mouthRevealRotation: CGFloat
     let cCurl: CGFloat
     let reverseSCurl: CGFloat
     let inputOpacity: CGFloat
@@ -56,7 +59,8 @@ struct NozzleURLAnimator {
                 stageProgress: progress,
                 translation: CGPoint(x: 0, y: 18 * eased),
                 lift: 18 * eased,
-                mouthRotation: 0,
+                intoScreenDepth: 0.006 * eased,
+                mouthRevealRotation: 0,
                 cCurl: 0,
                 reverseSCurl: 0,
                 inputOpacity: 0,
@@ -66,9 +70,10 @@ struct NozzleURLAnimator {
             return NozzleURLAnimationFrame(
                 stage: keyframe.stage,
                 stageProgress: progress,
-                translation: CGPoint(x: 0, y: 18),
+                translation: CGPoint(x: 0, y: 18 + 4 * eased),
                 lift: 18,
-                mouthRotation: (.pi / 2) * eased,
+                intoScreenDepth: 0.006 + 0.038 * eased,
+                mouthRevealRotation: (.pi / 5) * eased,
                 cCurl: 0,
                 reverseSCurl: 0,
                 inputOpacity: 0,
@@ -79,11 +84,12 @@ struct NozzleURLAnimator {
                 stage: keyframe.stage,
                 stageProgress: progress,
                 translation: CGPoint(
-                    x: 112 * eased,
-                    y: 18 + sin(.pi * eased) * 30
+                    x: 5 * sin(.pi * eased),
+                    y: 22 + 12 * eased
                 ),
                 lift: 18,
-                mouthRotation: .pi / 2,
+                intoScreenDepth: 0.044 + 0.022 * sin(.pi * eased),
+                mouthRevealRotation: (.pi / 5) + (3 * .pi / 10) * eased,
                 cCurl: eased,
                 reverseSCurl: 0,
                 inputOpacity: 0,
@@ -95,11 +101,12 @@ struct NozzleURLAnimator {
                 stage: keyframe.stage,
                 stageProgress: progress,
                 translation: CGPoint(
-                    x: 112 + 74 * eased,
-                    y: 18 + sin(eased * .pi * 2) * 13
+                    x: -5 * sin(eased * .pi * 2),
+                    y: 34 + 8 * eased
                 ),
                 lift: 18,
-                mouthRotation: .pi / 2,
+                intoScreenDepth: 0.044 - 0.026 * eased + 0.008 * sin(eased * .pi * 2),
+                mouthRevealRotation: .pi / 2,
                 cCurl: 1,
                 reverseSCurl: eased,
                 inputOpacity: inputProgress,

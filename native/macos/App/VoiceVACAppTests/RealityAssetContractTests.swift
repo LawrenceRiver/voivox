@@ -72,13 +72,28 @@ final class RealityAssetContractTests: XCTestCase {
         XCTAssertEqual(contract.reproducibility.sceneSemanticSHA256.count, 64)
     }
 
-    func testBundledDeviceUsesVacuumMaterialsInsteadOfOrnamentalBrass() throws {
+    func testBundledDeviceKeepsTheHoseWhiteAndWarmsOnlyTheVacuumHead() throws {
         let contract = try loadContract()
 
         XCTAssertFalse(contract.materials.contains("MAT_BRASS_ACCENT"))
         XCTAssertFalse(contract.materials.contains { $0.localizedCaseInsensitiveContains("brass") })
+        XCTAssertTrue(contract.materials.contains("MAT_PEARL_PLASTIC"))
+        XCTAssertTrue(contract.materials.contains("MAT_PEARL_RIBBED"))
         XCTAssertTrue(contract.materials.contains("MAT_TOY_IVORY"))
-        XCTAssertTrue(contract.materials.contains("MAT_TOY_IVORY_RIBBED"))
+        XCTAssertEqual(contract.materialAssignments["VAC_PORT"], ["MAT_PEARL_PLASTIC"])
+        XCTAssertEqual(contract.materialAssignments["VAC_HOSE_SKIN"], ["MAT_PEARL_RIBBED"])
+        XCTAssertEqual(contract.materialAssignments["VAC_NOZZLE_SHELL"], ["MAT_TOY_IVORY"])
+        XCTAssertEqual(contract.materialAssignments["VAC_NOZZLE_TIP"], ["MAT_TOY_IVORY"])
+    }
+
+    func testBundledDockPosePointsTheDuckbillUpward() throws {
+        let contract = try loadContract()
+        let dock = try XCTUnwrap(contract.runtimePoseDelivery.namedPoses["nozzleDocked"])
+
+        XCTAssertEqual(abs(dock.transform.rotationQuaternion[1]), sqrt(0.5), accuracy: 0.000_1)
+        XCTAssertEqual(abs(dock.transform.rotationQuaternion[2]), 0, accuracy: 0.000_1)
+        XCTAssertEqual(abs(dock.transform.rotationQuaternion[3]), sqrt(0.5), accuracy: 0.000_1)
+        XCTAssertEqual(abs(dock.transform.rotationQuaternion[0]), 0, accuracy: 0.000_1)
     }
 
     func testBundledNozzleHasTwoToyEyes() throws {
@@ -314,6 +329,7 @@ private struct AssetContract: Decodable {
     let runtimeNodes: [String]
     let joints: [String]
     let materials: [String]
+    let materialAssignments: [String: [String]]
     let localBounds: [String: Bounds]
     let nominalDockTransform: AssetTransform
     let nozzlePivot: AssetTransform

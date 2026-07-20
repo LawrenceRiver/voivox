@@ -192,21 +192,32 @@ final class VoiceVACDeviceInteractionController {
         }
         let docked = try requiredTransform(for: .nozzleDocked)
         let lifted = try requiredTransform(for: .nozzleLiftRotate)
-        let deployed = try requiredTransform(for: .nozzleDeployed)
         let authored: Transform
         switch frame.stage {
         case .unlockAndLift:
             authored = Self.interpolate(from: docked, to: lifted, progress: Float(frame.stageProgress))
-        case .rotateInPlane:
+        case .rotateInPlane, .cExtension, .reverseSCurlAndInput:
+            // The URL gesture stays above its dock and bends through Z depth.
+            // Interpolating toward the drag pose here would introduce the old
+            // rightward screen-plane sweep the interaction is meant to avoid.
             authored = lifted
-        case .cExtension, .reverseSCurlAndInput:
-            authored = Self.interpolate(from: lifted, to: deployed, progress: Float(frame.stageProgress))
         }
         var transformed = authored
-        let extraRotation = simd_quatf(angle: Float(frame.mouthRotation), axis: SIMD3(0, 0, 1))
-        transformed.rotation = simd_normalize(authored.rotation * extraRotation)
+        let mouthReveal = simd_quatf(
+            angle: Float(frame.mouthRevealRotation),
+            axis: SIMD3(1, 0, 0)
+        )
+        // This is a screen-space pitch, not a local-roll. The dock pose turns
+        // the narrow side of the nozzle toward the viewer; pre-multiplying
+        // tips its upward-facing mouth through Z until the opening faces the
+        // camera at the end of the reverse-S gesture.
+        transformed.rotation = simd_normalize(mouthReveal * authored.rotation)
         nozzleEntity.transform = transformed
         recenterNozzlePresentation()
+        // The presentation camera sits on +Z and looks toward -Z. Moving the
+        // presentation root in -Z therefore makes the head curl into the
+        // screen instead of sliding across the desktop to the right.
+        nozzlePresentationRootEntity?.position.z -= Float(frame.intoScreenDepth)
     }
 
     func bindNozzlePresentationRoot(_ root: Entity) {

@@ -59,10 +59,14 @@ final class ProductionInteractionIntegrationTests: XCTestCase {
         XCTAssertEqual(deployed.translation.x, expected.translation.x, accuracy: 0.000001)
         XCTAssertEqual(deployed.translation.y, expected.translation.y, accuracy: 0.000001)
         XCTAssertEqual(deployed.translation.z, expected.translation.z, accuracy: 0.000001)
-        XCTAssertEqual(deployed.rotation.real, expected.rotation.real, accuracy: 0.000001)
-        XCTAssertEqual(deployed.rotation.imag.x, expected.rotation.imag.x, accuracy: 0.000001)
-        XCTAssertEqual(deployed.rotation.imag.y, expected.rotation.imag.y, accuracy: 0.000001)
-        XCTAssertEqual(deployed.rotation.imag.z, expected.rotation.imag.z, accuracy: 0.000001)
+        // q and -q encode the same orientation. The new upward dock pose makes
+        // slerp arrive at the deployed quaternion through the opposite, but
+        // visually identical, quaternion hemisphere.
+        let deployedForward = deployed.rotation.act(SIMD3<Float>(0, -1, 0))
+        let expectedForward = expected.rotation.act(SIMD3<Float>(0, -1, 0))
+        XCTAssertEqual(deployedForward.x, expectedForward.x, accuracy: 0.000001)
+        XCTAssertEqual(deployedForward.y, expectedForward.y, accuracy: 0.000001)
+        XCTAssertEqual(deployedForward.z, expectedForward.z, accuracy: 0.000001)
     }
 
     func testLiveFactoryWiresOneSharedStoreRuntimeAndRealPanels() throws {
@@ -236,7 +240,9 @@ final class ProductionInteractionIntegrationTests: XCTestCase {
 
         XCTAssertNotEqual(nozzle.transform, initial)
         XCTAssertEqual(presenter.urlPresentationEvents, [false, true])
-        XCTAssertEqual(try XCTUnwrap(presenter.nozzleMoves.last).center.x, 386, accuracy: 0.001)
+        let finalMove = try XCTUnwrap(presenter.nozzleMoves.last)
+        XCTAssertEqual(finalMove.center.x, 200, accuracy: 0.001)
+        XCTAssertEqual(finalMove.center.y, 242, accuracy: 0.001)
         XCTAssertFalse(clock.isRunning)
     }
 

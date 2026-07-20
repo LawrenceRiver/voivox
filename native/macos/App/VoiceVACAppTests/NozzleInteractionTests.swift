@@ -1,4 +1,5 @@
 import AppKit
+import RealityKit
 import simd
 import VoiceVACCore
 import XCTest
@@ -96,10 +97,39 @@ final class NozzleInteractionTests: XCTestCase {
         let firstPass = stride(from: 0.0, through: animator.duration, by: 0.025).map(animator.frame(at:))
         let secondPass = stride(from: 0.0, through: animator.duration, by: 0.025).map(animator.frame(at:))
         XCTAssertEqual(firstPass, secondPass)
+        XCTAssertLessThanOrEqual(
+            firstPass.map { abs($0.translation.x) }.max() ?? .infinity,
+            6,
+            "The URL gesture must curl into screen depth, not travel to the right"
+        )
+        XCTAssertGreaterThan(
+            firstPass.map(\.intoScreenDepth).max() ?? 0,
+            0.04,
+            "The double-click gesture needs a visible Z-depth S curl"
+        )
         XCTAssertEqual(animator.frame(at: 0).stage, .unlockAndLift)
         XCTAssertEqual(animator.frame(at: animator.duration).stage, .reverseSCurlAndInput)
-        XCTAssertEqual(animator.frame(at: animator.duration).mouthRotation, .pi / 2, accuracy: 0.0001)
+        XCTAssertEqual(animator.frame(at: animator.duration).mouthRevealRotation, .pi / 2, accuracy: 0.0001)
         XCTAssertTrue(animator.frame(at: animator.duration).showsURLInput)
+    }
+
+    func testDoubleClickFinishMovesIntoDepthAndExposesTheMouthToTheCamera() async throws {
+        let animator = NozzleURLAnimator()
+        let finalFrame = animator.frame(at: animator.duration)
+        let device = VoiceVACDeviceInteractionController()
+        let nozzle = try await device.loadNozzleClone()
+        let presentationRoot = Entity()
+        device.bindNozzlePresentationRoot(presentationRoot)
+
+        try device.applyURLAnimationFrame(finalFrame)
+
+        XCTAssertEqual(
+            presentationRoot.position.z,
+            -nozzle.position.z - Float(finalFrame.intoScreenDepth),
+            accuracy: 0.000_01
+        )
+        let cameraFacingMouthNormal = nozzle.transform.rotation.act(SIMD3<Float>(0, -1, 0))
+        XCTAssertGreaterThan(cameraFacingMouthNormal.z, 0.9)
     }
 
     func testURLInputOnlyBecomesKeyWhilePresentedAndAcceptsReturnAndStart() throws {
