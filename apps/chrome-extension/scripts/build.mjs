@@ -11,7 +11,8 @@ if (channel !== 'store' && channel !== 'automation') {
   throw new Error('Usage: node scripts/build.mjs <store|automation>');
 }
 
-const outputDirectory = join(extensionRoot, 'dist', channel);
+const distributionRoot = join(extensionRoot, 'dist');
+const outputDirectory = join(distributionRoot, channel);
 const packageJson = JSON.parse(await readFile(join(extensionRoot, 'package.json'), 'utf8'));
 const baseManifest = JSON.parse(
   await readFile(join(extensionRoot, 'config', 'manifest.base.json'), 'utf8')
@@ -21,6 +22,11 @@ const variantManifest = JSON.parse(
 );
 const buildChannelContract = await readBuildChannelContract();
 
+await mkdir(distributionRoot, { recursive: true });
+for (const entry of await readdir(distributionRoot, { withFileTypes: true })) {
+  if (entry.name === 'store' || entry.name === 'automation') continue;
+  await rm(join(distributionRoot, entry.name), { recursive: true, force: true });
+}
 await rm(outputDirectory, { recursive: true, force: true });
 await mkdir(outputDirectory, { recursive: true });
 
@@ -42,8 +48,7 @@ const moduleBuildResult = await build({
     popup: 'src/popup.ts',
     'service-worker': `src/service-worker.${channel}.ts`,
     offscreen: 'src/offscreen.ts',
-    'audio-worklet': 'src/audio-worklet.ts',
-    'asr-worker': 'src/asr-worker.ts'
+    'audio-worklet': 'src/audio-worklet.ts'
   },
   format: 'esm'
 });
@@ -78,19 +83,7 @@ const copies = [
   ['public/offscreen.html', 'offscreen.html'],
   ['public/content-tunnel.css', 'content-tunnel.css'],
   ['public/icon.png', 'icon.png'],
-  ['../../THIRD_PARTY_NOTICES.md', 'THIRD_PARTY_NOTICES.md'],
-  ['../../LICENSE', 'VACVOX_LICENSE.txt'],
-  ['../../node_modules/@huggingface/transformers/LICENSE', 'TRANSFORMERS_LICENSE.txt'],
-  ['../../node_modules/@huggingface/jinja/LICENSE', 'JINJA_LICENSE.txt'],
-  ['../../licenses/onnxruntime-MIT.txt', 'ONNXRUNTIME_LICENSE.txt'],
-  [
-    '../../node_modules/@huggingface/transformers/dist/ort-wasm-simd-threaded.jsep.mjs',
-    'wasm/ort-wasm-simd-threaded.jsep.mjs'
-  ],
-  [
-    '../../node_modules/@huggingface/transformers/dist/ort-wasm-simd-threaded.jsep.wasm',
-    'wasm/ort-wasm-simd-threaded.jsep.wasm'
-  ]
+  ['../../LICENSE', 'VACVOX_LICENSE.txt']
 ];
 
 for (const [source, destination] of copies) {

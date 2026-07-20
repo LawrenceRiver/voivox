@@ -25,7 +25,7 @@ function sha256(bytes: Uint8Array): string {
 
 describe('Chrome extension distribution build', () => {
   it.each(['store', 'automation'] as const)(
-    'packages the %s local ASR worker and WASM runtime under a strict MV3 policy',
+    'packages the %s desktop PCM relay without a browser ASR runtime',
     async (channel) => {
       await execFileAsync('npm', ['run', `build:${channel}`], { cwd: extensionDirectory });
 
@@ -38,22 +38,15 @@ describe('Chrome extension distribution build', () => {
       };
 
       expect(manifest.permissions).toContain('nativeMessaging');
-      expect(manifest.host_permissions).not.toContain('<all_urls>');
+      expect(manifest.host_permissions).toEqual(['http://127.0.0.1/*']);
       expect(manifest.content_security_policy?.extension_pages).toBe(
-        "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+        "script-src 'self'; object-src 'self'"
       );
 
       const requiredFiles = [
-        'asr-worker.js',
         'audio-worklet.js',
         'offscreen.js',
-        'VACVOX_LICENSE.txt',
-        'THIRD_PARTY_NOTICES.md',
-        'TRANSFORMERS_LICENSE.txt',
-        'JINJA_LICENSE.txt',
-        'ONNXRUNTIME_LICENSE.txt',
-        'wasm/ort-wasm-simd-threaded.jsep.mjs',
-        'wasm/ort-wasm-simd-threaded.jsep.wasm'
+        'VACVOX_LICENSE.txt'
       ];
       for (const path of requiredFiles) {
         const file = new URL(`../dist/${channel}/${path}`, import.meta.url);
@@ -61,11 +54,17 @@ describe('Chrome extension distribution build', () => {
         expect((await stat(file)).size).toBeGreaterThan(0);
       }
 
-      const jinjaLicense = await readFile(
-        new URL(`../dist/${channel}/JINJA_LICENSE.txt`, import.meta.url),
-        'utf8'
-      );
-      expect(jinjaLicense).toContain('Copyright (c) 2023 Hugging Face');
+      for (const removed of [
+        'asr-worker.js',
+        'TRANSFORMERS_LICENSE.txt',
+        'JINJA_LICENSE.txt',
+        'ONNXRUNTIME_LICENSE.txt',
+        'wasm/ort-wasm-simd-threaded.jsep.mjs',
+        'wasm/ort-wasm-simd-threaded.jsep.wasm'
+      ]) {
+        await expect(access(new URL(`../dist/${channel}/${removed}`, import.meta.url))).rejects.toThrow();
+        await expect(access(new URL(`../dist/${removed}`, import.meta.url))).rejects.toThrow();
+      }
 
       const popup = await readFile(
         new URL(`../dist/${channel}/popup.html`, import.meta.url),
@@ -76,6 +75,16 @@ describe('Chrome extension distribution build', () => {
         'utf8'
       );
       expect(`${popup}\n${offscreen}`).not.toMatch(/<script[^>]+src=["']https?:/iu);
+      expect(popup).not.toMatch(/(?:45|80)\s*MB/iu);
+
+      const builtSources = await Promise.all([
+        'offscreen.js',
+        'service-worker.js',
+        'popup.js'
+      ].map((path) => readFile(new URL(`../dist/${channel}/${path}`, import.meta.url), 'utf8')));
+      expect(builtSources.join('\n')).not.toMatch(
+        /(?:whisper|huggingface|transformers|asr-worker\.js|new\s+Worker\s*\()/iu
+      );
 
       const contentTunnel = await readFile(
         new URL(`../dist/${channel}/content-tunnel.js`, import.meta.url),
@@ -83,6 +92,11 @@ describe('Chrome extension distribution build', () => {
       );
       expect(contentTunnel).not.toMatch(/^\s*(?:import|export)\s/mu);
       expect(contentTunnel).toContain('registerContentTunnelRuntime();');
+
+      const packageJson = JSON.parse(
+        await readFile(new URL('../package.json', import.meta.url), 'utf8')
+      ) as { dependencies?: Record<string, string> };
+      expect(packageJson.dependencies).not.toHaveProperty('@huggingface/transformers');
     }
   );
 

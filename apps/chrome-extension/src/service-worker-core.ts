@@ -5,6 +5,10 @@ import {
   type BridgeConfig,
   type CaptureState
 } from './bridge.js';
+import {
+  normalizeCaptureErrorCode,
+  type CaptureErrorCode
+} from './capture-errors.js';
 import { chooseTranscriptionRoute, type TranscriptionMode } from './local-transcription.js';
 import { discoverNativeDesktop } from './native-discovery.js';
 import { syncTunnelSession } from './tunnel-session-sync.js';
@@ -20,6 +24,17 @@ import type { TargetSession } from './target-session.js';
 let operationTail: Promise<void> = Promise.resolve();
 let acceptingCaptureStart = false;
 const targetSessionStore = new TargetSessionStore();
+
+class CaptureOperationError extends Error {
+  constructor(
+    message: string,
+    readonly code?: CaptureErrorCode,
+    readonly retryable?: boolean
+  ) {
+    super(message);
+    this.name = 'CaptureOperationError';
+  }
+}
 
 export type ServiceWorkerRuntimeOptions = {
   channel: 'store' | 'automation';
@@ -97,10 +112,13 @@ function registerRuntimeMessages(_options: ServiceWorkerRuntimeOptions): void {
       return await operation();
     } catch (error) {
       const current = await getCaptureState();
+      const failure = error instanceof CaptureOperationError ? error : undefined;
       const response: CaptureState = {
         ...current,
+        active: false,
+        ...(typeof failure?.retryable === 'boolean' ? { canRetry: failure.retryable } : {}),
         error: error instanceof Error ? error.message : '无法完成这次本地转写。',
-        errorCode: undefined,
+        errorCode: failure?.code,
         phase: 'error'
       };
       await saveCaptureState(response);
@@ -250,21 +268,36 @@ async function cancelTranscription(current: CaptureState): Promise<CaptureState>
 
 async function startCapture(mode: TranscriptionMode): Promise<CaptureState> {
   const desktop = await discoverNativeDesktop();
-  const route = chooseTranscriptionRoute(desktop, true);
+  const route = chooseTranscriptionRoute(desktop);
   if (route === 'unavailable') {
-    throw new Error('此浏览器无法运行本地转写模型。');
+    if (desktop.source === 'native-messaging' && desktop.localAsr === 'missing') {
+      throw new CaptureOperationError(
+        'The local Qwen3-ASR model is not installed.',
+        'ASR_MODEL_MISSING',
+        false
+      );
+    }
+    throw new CaptureOperationError(
+      'Open the Voice VAC App before starting local transcription.',
+      'NATIVE_HOST_UNAVAILABLE',
+      true
+    );
+  }
+  if (desktop.source !== 'native-messaging') {
+    throw new Error('Open the Voice VAC App before starting local transcription.');
   }
 
   const targetSession = await targetSessionStore.get();
   if (!targetSession) throw new TabArmError('TAB_NOT_ARMED', 'The selected Chrome tab is not armed.');
+  if (!targetSession.tunnelSessionId) {
+    throw new Error('Reconnect this armed tab to the Voice VAC App before starting.');
+  }
 
   await ensureOffscreenDocument();
   const streamId = await getMediaStreamId(targetSession.tabId);
-  const bridge: BridgeConfig | undefined = desktop.source === 'native-messaging'
-    ? { baseUrl: desktop.baseUrl, token: desktop.token }
-    : undefined;
+  const bridge: BridgeConfig = { baseUrl: desktop.baseUrl, token: desktop.token };
   acceptingCaptureStart = true;
-  let response: { error?: string; sessionId?: string };
+  let response: { error?: string; errorCode?: string; retryable?: boolean; sessionId?: string };
   try {
     response = await chrome.runtime.sendMessage({
       bridge,
@@ -274,14 +307,19 @@ async function startCapture(mode: TranscriptionMode): Promise<CaptureState> {
       tabTitle: targetSession.title,
       tabUrl: targetSession.url,
       target: 'offscreen',
+      tunnelSessionId: targetSession.tunnelSessionId,
       type: 'audio:start'
-    }) as { error?: string; sessionId?: string };
+    }) as { error?: string; errorCode?: string; retryable?: boolean; sessionId?: string };
   } finally {
     acceptingCaptureStart = false;
   }
 
   if (!response.sessionId) {
-    throw new Error(response.error ?? '无法开始标签页静音收录。');
+    throw new CaptureOperationError(
+      response.error ?? '无法开始标签页静音收录。',
+      normalizeCaptureErrorCode(response.errorCode),
+      typeof response.retryable === 'boolean' ? response.retryable : undefined
+    );
   }
   const next = await getCaptureState();
   if (next.active || next.phase === 'capturing') {
@@ -454,7 +492,10 @@ async function retryDetachedDesktopTunnel(): Promise<void> {
 function canAcceptOffscreenState(current: CaptureState, incoming: CaptureState): boolean {
   if (isLifecycleTerminal(current)) return false;
   if (current.phase === 'armed') {
-    return acceptingCaptureStart && incoming.active && incoming.phase === 'capturing';
+    return acceptingCaptureStart && (
+      (incoming.active && incoming.phase === 'capturing')
+      || (!incoming.active && incoming.phase === 'error')
+    );
   }
   if (current.sessionId && incoming.sessionId && current.sessionId !== incoming.sessionId) {
     return false;
@@ -507,21 +548,10 @@ function targetMessageFailure(error: unknown): {
 
 async function retryTranscription(): Promise<CaptureState> {
   const current = await getCaptureState();
-  if (!current.canRetry || current.route !== 'browser-local') {
+  if (!current.canRetry || current.route !== 'desktop-local') {
     return current;
   }
-  const wasCreated = await ensureOffscreenDocument();
-  if (wasCreated) {
-    return markBrowserBufferLost(current);
-  }
-  const response = await chrome.runtime.sendMessage({ target: 'offscreen', type: 'audio:retry' }) as {
-    error?: string;
-    state?: CaptureState;
-  };
-  if (!response.state) {
-    throw new Error(response.error ?? '没有可重试的本地音频。');
-  }
-  return getCaptureState();
+  return markBrowserBufferLost(current);
 }
 
 async function setMode(value: unknown): Promise<CaptureState> {
@@ -546,7 +576,7 @@ async function markBrowserBufferLost(current: CaptureState): Promise<CaptureStat
   const lostBuffer: CaptureState = {
     ...current,
     canRetry: false,
-    error: '浏览器已回收上次的本地音频缓冲，请重新开始收录。',
+    error: 'Chrome does not retain relayed tab audio. Start a new capture.',
     errorCode: undefined,
     phase: 'error'
   };
@@ -562,7 +592,7 @@ async function ensureOffscreenDocument(): Promise<boolean> {
   await chrome.offscreen.createDocument({
     url: 'offscreen.html',
     reasons: [chrome.offscreen.Reason.USER_MEDIA],
-    justification: 'Capture an explicitly selected tab and run Voice Vac local speech recognition.'
+    justification: 'Relay one explicitly selected tab audio stream to the local Voice VAC App.'
   });
   return true;
 }

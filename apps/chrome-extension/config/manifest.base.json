@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Voice VAC",
-  "description": "Privately transcribe the selected browser tab with a local model and the optional Voice VAC desktop companion.",
+  "description": "Privately relay one selected browser tab to the local Voice VAC App and Qwen speech model.",
   "minimum_chrome_version": "116",
   "action": {
     "default_popup": "popup.html",
@@ -19,12 +19,9 @@
     "type": "module"
   },
   "host_permissions": [
-    "http://127.0.0.1/*",
-    "https://huggingface.co/*",
-    "https://*.huggingface.co/*",
-    "https://*.hf.co/*"
+    "http://127.0.0.1/*"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+    "extension_pages": "script-src 'self'; object-src 'self'"
   }
 }

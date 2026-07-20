@@ -24,6 +24,21 @@ describe('capture error catalog', () => {
     }
   });
 
+  it('includes every stable desktop relay and local Qwen error', () => {
+    expect(CAPTURE_ERROR_CODES).toEqual(expect.arrayContaining([
+      'NATIVE_HOST_UNAVAILABLE',
+      'ASR_RUNTIME_MISSING',
+      'ASR_MODEL_MISSING',
+      'ASR_MODEL_LOAD_FAILED',
+      'ASR_STARTUP_TIMEOUT',
+      'ASR_INFERENCE_TIMEOUT',
+      'ASR_INFERENCE_FAILED',
+      'AUDIO_SEQUENCE_MISMATCH',
+      'AUDIO_RELAY_BACKPRESSURE',
+      'NO_AUDIO_AFTER_TIMEOUT'
+    ]));
+  });
+
   it('assigns explicit recovery behavior', () => {
     expect(captureError('USER_PLAY_REQUIRED').recovery).toBe('user-play');
     expect(captureError('TAB_FROZEN').recovery).toBe('bring-forward');

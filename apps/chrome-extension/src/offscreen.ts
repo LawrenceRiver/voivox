@@ -1,44 +1,37 @@
 import { StreamingDownsampler } from './audio-codec.js';
-import { AsrWorkerClient, AsrWorkerOperationError } from './asr-worker-client.js';
+import {
+  DesktopAudioRelay,
+  DesktopAudioRelayError,
+  type DesktopTranscriptSnapshot
+} from './desktop-audio-relay.js';
 import {
   normalizeCaptureState,
   type BridgeConfig,
   type CaptureState
 } from './bridge.js';
-import type { BrowserTranscriberState } from './browser-transcriber.js';
-import { CapturedAudio } from './captured-audio.js';
 import type { TranscriptionMode } from './local-transcription.js';
-import { syncBrowserTranscriptToDesktop } from './transcript-sync.js';
-
-type ActiveRoute = 'browser-local';
-const ASR_WORKER_IDLE_MS = 2 * 60 * 1_000;
 
 let audioContext: AudioContext | undefined;
 let audioStream: MediaStream | undefined;
 let workletNode: AudioWorkletNode | undefined;
 let silentGain: GainNode | undefined;
+let relay: DesktopAudioRelay | undefined;
 let sessionId: string | undefined;
 let tabTitle: string | undefined;
 let tabUrl: string | undefined;
-let route: ActiveRoute | undefined;
+let tunnelSessionId: string | undefined;
 let mode: TranscriptionMode = 'quality';
-let bridge: BridgeConfig | undefined;
-let transcriptionWork: Promise<void> | undefined;
-let workerStateQueue: Promise<void> = Promise.resolve();
-let operationTail: Promise<void> = Promise.resolve();
-let asrClient: AsrWorkerClient | undefined;
-let asrIdleTimer: ReturnType<typeof setTimeout> | undefined;
-let captureLimitReached = false;
 let captureGeneration = 0;
+let operationTail: Promise<void> = Promise.resolve();
+let stateUpdateTail: Promise<void> = Promise.resolve();
+let transcriptionWork: Promise<void> | undefined;
 let downsampler = new StreamingDownsampler();
-const capturedBrowserAudio = new CapturedAudio({ maximumSeconds: 10 * 60, sampleRate: 16_000 });
 
 async function getCaptureState(): Promise<CaptureState> {
-  const state = await chrome.runtime.sendMessage({
+  return normalizeCaptureState(await chrome.runtime.sendMessage({
     target: 'service-worker',
     type: 'capture-state:get'
-  });
-  return normalizeCaptureState(state);
+  }));
 }
 
 async function saveCaptureState(state: CaptureState): Promise<void> {
@@ -50,42 +43,32 @@ async function saveCaptureState(state: CaptureState): Promise<void> {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.target !== 'offscreen') {
-    return;
-  }
+  if (message?.target !== 'offscreen') return;
 
-  if (message.type === 'audio:start') {
-    void serializeCaptureOperation(() => startCapture(message)).then(sendResponse).catch((error: unknown) => {
-      sendResponse({ error: asError(error).message });
-    });
-    return true;
-  }
+  const operation: (() => Promise<unknown>) | undefined = message.type === 'audio:start'
+    ? () => startCapture(message)
+    : message.type === 'audio:stop'
+      ? async () => ({ state: await stopCapture() })
+      : message.type === 'audio:cancel'
+        ? async () => ({ state: await cancelCapture() })
+        : message.type === 'audio:retry'
+          ? async () => {
+              throw new Error('Voice VAC cannot retry audio that was not retained by Chrome.');
+            }
+          : undefined;
+  if (!operation) return;
 
-  if (message.type === 'audio:stop') {
-    void serializeCaptureOperation(() => stopCaptureFromMessage()).then(sendResponse).catch((error: unknown) => {
-      sendResponse({ error: asError(error).message });
+  void serializeCaptureOperation(operation)
+    .then(sendResponse)
+    .catch((error: unknown) => {
+      const failure = error instanceof DesktopAudioRelayError ? error : undefined;
+      sendResponse({
+        error: asError(error).message,
+        ...(failure ? { errorCode: failure.code, retryable: failure.retryable } : {})
+      });
     });
-    return true;
-  }
-
-  if (message.type === 'audio:retry') {
-    void serializeCaptureOperation(() => retryBrowserTranscription()).then((state) => sendResponse({ state })).catch((error: unknown) => {
-      sendResponse({ error: asError(error).message });
-    });
-    return true;
-  }
-
-  if (message.type === 'audio:cancel') {
-    void serializeCaptureOperation(() => cancelBrowserTranscription()).then((state) => sendResponse({ state })).catch((error: unknown) => {
-      sendResponse({ error: asError(error).message });
-    });
-    return true;
-  }
+  return true;
 });
-
-async function stopCaptureFromMessage(): Promise<{ state: CaptureState }> {
-  return { state: await stopCapture() };
-}
 
 async function startCapture(message: {
   bridge?: BridgeConfig;
@@ -94,25 +77,28 @@ async function startCapture(message: {
   streamId: string;
   tabTitle: string;
   tabUrl?: string;
+  tunnelSessionId?: string;
 }): Promise<{ sessionId: string }> {
-  if (message.route !== 'browser-local') {
-    throw new Error('Chrome 标签页只能在浏览器本地转写。');
+  if (message.route !== 'desktop-local' || !message.bridge) {
+    throw new Error('Voice VAC requires the authenticated local App relay.');
   }
-  if (transcriptionWork) {
-    throw new Error('请等待当前本地转写完成。');
+  if (!message.tabUrl || !message.tunnelSessionId) {
+    throw new DesktopAudioRelayError('TAB_NOT_ARMED');
   }
+  if (relay || transcriptionWork) throw new DesktopAudioRelayError('STREAM_ENDED');
+
   await releaseAudioGraph();
-  resetCaptureBuffers();
-  sessionId = undefined;
-  route = message.route;
+  downsampler.reset();
   mode = message.mode;
-  bridge = message.bridge;
   tabTitle = message.tabTitle;
   tabUrl = message.tabUrl;
-  captureLimitReached = false;
+  tunnelSessionId = message.tunnelSessionId;
   const generation = ++captureGeneration;
 
+  let activeRelay: DesktopAudioRelay | undefined;
   try {
+    // Consume Chrome's short-lived stream id immediately. No microphone,
+    // device enumeration, or system-output source enters this graph.
     audioStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         mandatory: {
@@ -121,25 +107,42 @@ async function startCapture(message: {
         }
       } as MediaTrackConstraints
     });
+
+    const startedRelay = new DesktopAudioRelay({
+      bridge: message.bridge,
+      onDelta: (snapshot) => publishTranscriptSnapshot(snapshot, generation),
+      onFailure: (error) => publishRelayFailure(error, generation)
+    });
+    activeRelay = startedRelay;
+    relay = startedRelay;
+
+    let streamEnded = false;
     for (const track of audioStream.getTracks()) {
       track.addEventListener('ended', () => {
+        streamEnded = true;
         void serializeCaptureOperation(async () => {
-          if (generation !== captureGeneration) {
-            return getCaptureState();
-          }
-          return stopCapture();
-        }).catch((error: unknown) => enqueueCaptureError(asError(error)));
+          if (generation !== captureGeneration || relay !== startedRelay) return;
+          await stopCapture();
+        }).catch((error: unknown) => {
+          void publishRelayFailure(toRelayError(error), generation);
+        });
       }, { once: true });
     }
 
-    sessionId = `browser_${crypto.randomUUID()}`;
+    sessionId = await startedRelay.start({
+      mode: message.mode,
+      tabTitle: message.tabTitle,
+      tabUrl: message.tabUrl,
+      tunnelSessionId: message.tunnelSessionId
+    });
+    if (streamEnded) throw new DesktopAudioRelayError('STREAM_ENDED');
 
     audioContext = new AudioContext();
     await audioContext.audioWorklet.addModule(chrome.runtime.getURL('audio-worklet.js'));
     const source = audioContext.createMediaStreamSource(audioStream);
     workletNode = new AudioWorkletNode(audioContext, 'voivox-capture');
     workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
-      queueAudio(event.data, audioContext?.sampleRate ?? 48_000, generation);
+      queueAudio(event.data, audioContext?.sampleRate ?? 48_000, generation, startedRelay);
     };
     source.connect(workletNode);
     silentGain = audioContext.createGain();
@@ -147,232 +150,190 @@ async function startCapture(message: {
     workletNode.connect(silentGain);
     silentGain.connect(audioContext.destination);
     await audioContext.resume();
-    const started: CaptureState = {
+
+    await saveCaptureState({
       active: true,
       mode,
       phase: 'capturing',
-      route: 'browser-local',
+      route: 'desktop-local',
       sessionId,
-      tabTitle: message.tabTitle,
-      ...(message.tabUrl ? { tabUrl: message.tabUrl } : {})
-    };
-    await saveCaptureState(started);
+      tabTitle,
+      tabUrl,
+      tunnelSessionId
+    });
     return { sessionId };
   } catch (error) {
+    const failure = normalizeStartError(error);
+    await stateUpdateTail;
+    await saveCaptureState({
+      active: false,
+      canRetry: failure.retryable,
+      error: failure.message,
+      errorCode: failure.code,
+      mode,
+      phase: 'error',
+      route: 'desktop-local',
+      ...(sessionId ? { sessionId } : {}),
+      ...(tabTitle ? { tabTitle } : {}),
+      ...(tabUrl ? { tabUrl } : {}),
+      ...(tunnelSessionId ? { tunnelSessionId } : {})
+    });
     await releaseAudioGraph().catch(() => undefined);
-    resetCaptureBuffers();
-    sessionId = undefined;
-    route = undefined;
-    bridge = undefined;
-    tabUrl = undefined;
-    throw error;
+    if (sessionId && activeRelay) {
+      const stopWork = activeRelay.stop().catch(() => undefined);
+      await Promise.race([stopWork, delay(250)]);
+    }
+    activeRelay?.cancel();
+    clearCapture(generation);
+    throw failure;
   }
 }
 
 async function stopCapture(): Promise<CaptureState> {
-  const currentRoute = route;
-  const currentSessionId = sessionId;
-  const currentTabTitle = tabTitle;
-  const currentTabUrl = tabUrl;
-  captureGeneration += 1;
-  await releaseAudioGraph();
-
-  if (!currentRoute || !currentSessionId) {
+  const activeRelay = relay;
+  const activeSessionId = sessionId;
+  const generation = captureGeneration;
+  if (!activeRelay || !activeSessionId) {
     const current = await getCaptureState();
-    if (!current.active) {
-      return current;
-    }
-    const recovered: CaptureState = {
-      active: false,
-      mode: current.mode,
-      phase: 'idle'
-    };
-    await saveCaptureState(recovered);
-    return recovered;
+    if (!current.active) return current;
+    const idle: CaptureState = { active: false, mode: current.mode, phase: 'idle' };
+    await saveCaptureState(idle);
+    return idle;
   }
 
-  const baseState: CaptureState = {
+  await releaseAudioGraph();
+  await stateUpdateTail;
+  const transcribing: CaptureState = {
     active: false,
     mode,
     phase: 'transcribing',
-    route: 'browser-local',
-    sessionId: currentSessionId,
-    tabTitle: currentTabTitle,
-    ...(currentTabUrl ? { tabUrl: currentTabUrl } : {})
+    route: 'desktop-local',
+    sessionId: activeSessionId,
+    tabTitle,
+    tabUrl,
+    tunnelSessionId
   };
-  if (capturedBrowserAudio.isSilent()) {
-    const silentState: CaptureState = {
-      ...baseState,
-      canRetry: false,
-      error: '没有检测到可转写的标签页声音。请确认视频正在播放。',
-      phase: 'error'
-    };
-    await saveCaptureState(silentState);
-    resetCaptureBuffers();
-    sessionId = undefined;
-    route = undefined;
-    bridge = undefined;
-    tabUrl = undefined;
-    return silentState;
-  }
+  await saveCaptureState(transcribing);
 
-  await saveCaptureState(baseState);
-  transcriptionWork = runBrowserTranscription().finally(() => {
-    transcriptionWork = undefined;
+  const stopResult = activeRelay.stop();
+  const completion = delay(0).then(() => finishTranscription(
+    activeRelay,
+    stopResult,
+    transcribing,
+    generation
+  ));
+  const tracked = completion.finally(() => {
+    if (transcriptionWork === tracked) transcriptionWork = undefined;
   });
-  return baseState;
+  transcriptionWork = tracked;
+  void tracked.catch(() => undefined);
+  return transcribing;
 }
 
-async function retryBrowserTranscription(): Promise<CaptureState> {
-  const current = await getCaptureState();
-  if (transcriptionWork) {
-    return current;
-  }
-  if (current.route !== 'browser-local' || !current.canRetry) {
-    throw new Error('没有保留可重试的浏览器本地音频。');
-  }
-  const retrying: CaptureState = {
-    ...current,
-    canRetry: false,
-    error: undefined,
-    errorCode: undefined,
-    phase: 'transcribing'
-  };
-  await saveCaptureState(retrying);
-  transcriptionWork = runBrowserTranscription().finally(() => {
-    transcriptionWork = undefined;
-  });
-  return retrying;
-}
-
-async function cancelBrowserTranscription(): Promise<CaptureState> {
-  const work = transcriptionWork;
-  if (!work) {
-    return getCaptureState();
-  }
-  asrClient?.cancel();
-  await work;
-  return getCaptureState();
-}
-
-async function runBrowserTranscription(): Promise<void> {
-  const client = getAsrClient();
+async function finishTranscription(
+  activeRelay: DesktopAudioRelay,
+  stopResult: Promise<DesktopTranscriptSnapshot>,
+  transcribing: CaptureState,
+  generation: number
+): Promise<void> {
   try {
-    const durationSeconds = capturedBrowserAudio.durationSeconds;
-    const text = await client.transcribe(capturedBrowserAudio.snapshot(), mode);
-    if (!text.trim()) {
-      throw new Error('本地模型没有识别出文字。你可以保留音频后重试。');
-    }
-    await workerStateQueue;
-    const current = await getCaptureState();
-    const completed: CaptureState = {
-      ...current,
+    const result = await stopResult;
+    await stateUpdateTail;
+    if (generation !== captureGeneration || relay !== activeRelay) return;
+    await saveCaptureState({
+      ...transcribing,
       active: false,
       canRetry: false,
-      error: undefined,
-      errorCode: undefined,
-      mode,
       phase: 'complete',
-      route: 'browser-local',
-      transcript: text
-    };
-    const syncInput = {
-      bridge,
-      durationSeconds,
-      tabTitle: tabTitle ?? '当前 Chrome 标签页',
-      tabUrl,
-      transcript: text
-    };
-    await saveCaptureState(completed);
-    capturedBrowserAudio.clear();
-    void syncBrowserTranscriptToDesktop(syncInput);
+      transcript: result.transcript
+    });
   } catch (error) {
-    await workerStateQueue;
+    const failure = toRelayError(error);
+    await stateUpdateTail;
+    if (generation !== captureGeneration || relay !== activeRelay) return;
+    await saveCaptureState({
+      ...transcribing,
+      active: false,
+      canRetry: failure.retryable,
+      error: failure.message,
+      errorCode: failure.code,
+      phase: 'error'
+    });
+  } finally {
+    clearCapture(generation);
+  }
+}
+
+async function cancelCapture(): Promise<CaptureState> {
+  const activeRelay = relay;
+  const generation = captureGeneration;
+  activeRelay?.cancel();
+  await releaseAudioGraph();
+  await transcriptionWork?.catch(() => undefined);
+  const current = await getCaptureState();
+  const cancelled: CaptureState = {
+    ...current,
+    active: false,
+    canRetry: false,
+    error: 'The transcription was cancelled.',
+    errorCode: 'TRANSCRIPTION_CANCELLED',
+    phase: 'error',
+    route: 'desktop-local'
+  };
+  await saveCaptureState(cancelled);
+  clearCapture(generation);
+  return cancelled;
+}
+
+function queueAudio(
+  samples: Float32Array,
+  sourceRate: number,
+  generation: number,
+  activeRelay: DesktopAudioRelay
+): void {
+  if (generation !== captureGeneration || relay !== activeRelay) return;
+  try {
+    activeRelay.append(downsampler.resample(samples, sourceRate));
+  } catch (error) {
+    const failure = toRelayError(error);
+    void publishRelayFailure(failure, generation);
+    void serializeCaptureOperation(async () => {
+      if (generation === captureGeneration && relay === activeRelay) await stopCapture();
+    }).catch(() => undefined);
+  }
+}
+
+function publishTranscriptSnapshot(
+  snapshot: DesktopTranscriptSnapshot,
+  generation: number
+): Promise<void> {
+  return enqueueStateUpdate(async () => {
+    if (generation !== captureGeneration) return;
     const current = await getCaptureState();
-    const errorCode = error instanceof AsrWorkerOperationError
-      ? error.code === 'cancelled'
-        ? 'TRANSCRIPTION_CANCELLED'
-        : 'TRANSCRIPTION_TIMEOUT'
-      : undefined;
+    if (current.route !== 'desktop-local' || current.sessionId !== snapshot.sessionId) return;
+    await saveCaptureState({
+      ...current,
+      transcript: snapshot.transcript
+    });
+  });
+}
+
+function publishRelayFailure(
+  error: DesktopAudioRelayError,
+  generation: number
+): Promise<void> {
+  return enqueueStateUpdate(async () => {
+    if (generation !== captureGeneration) return;
+    const current = await getCaptureState();
     await saveCaptureState({
       ...current,
       active: false,
-      canRetry: true,
-      error: errorCode ? undefined : asError(error).message,
-      errorCode,
-      mode,
+      canRetry: error.retryable,
+      error: error.message,
+      errorCode: error.code,
       phase: 'error',
-      route: 'browser-local'
+      route: 'desktop-local'
     });
-  } finally {
-    scheduleAsrClientDisposal();
-  }
-}
-
-function getAsrClient(): AsrWorkerClient {
-  cancelAsrClientDisposal();
-  if (!asrClient) {
-    const worker = new Worker(chrome.runtime.getURL('asr-worker.js'), { type: 'module' });
-    let client: AsrWorkerClient;
-    client = new AsrWorkerClient(
-      worker,
-      (state) => {
-        if (asrClient !== client) {
-          return;
-        }
-        const update = workerStateQueue.then(() => publishWorkerState(state));
-        workerStateQueue = update.catch(() => undefined);
-      },
-      () => {
-        if (asrClient !== client) {
-          return;
-        }
-        cancelAsrClientDisposal();
-        asrClient = undefined;
-      }
-    );
-    asrClient = client;
-  }
-  return asrClient;
-}
-
-function scheduleAsrClientDisposal(): void {
-  cancelAsrClientDisposal();
-  const idleClient = asrClient;
-  if (!idleClient) {
-    return;
-  }
-  asrIdleTimer = setTimeout(() => {
-    asrIdleTimer = undefined;
-    if (asrClient !== idleClient) {
-      return;
-    }
-    asrClient = undefined;
-    void idleClient.dispose().catch(() => undefined);
-  }, ASR_WORKER_IDLE_MS);
-}
-
-function cancelAsrClientDisposal(): void {
-  if (asrIdleTimer) {
-    clearTimeout(asrIdleTimer);
-    asrIdleTimer = undefined;
-  }
-}
-
-async function publishWorkerState(workerState: BrowserTranscriberState): Promise<void> {
-  if (workerState.phase === 'idle' || workerState.phase === 'complete' || workerState.phase === 'error') {
-    return;
-  }
-  const current = await getCaptureState();
-  if (current.route !== 'browser-local') {
-    return;
-  }
-  await saveCaptureState({
-    ...current,
-    active: false,
-    mode: workerState.mode,
-    phase: workerState.phase,
-    progress: workerState.phase === 'downloading' ? workerState.progress : undefined
   });
 }
 
@@ -390,51 +351,47 @@ async function releaseAudioGraph(): Promise<void> {
   audioContext = undefined;
 }
 
-function queueAudio(samples: Float32Array, sourceRate: number, generation: number): void {
-  if (generation !== captureGeneration) {
-    return;
-  }
-  const resampled = downsampler.resample(samples, sourceRate);
-  if (route !== 'browser-local') {
-    return;
-  }
-  const accepted = capturedBrowserAudio.append(resampled);
-  if (!accepted && !captureLimitReached) {
-    captureLimitReached = true;
-    void serializeCaptureOperation(() => stopCapture())
-      .catch((error: unknown) => enqueueCaptureError(asError(error)));
-  }
-}
-
-async function reportCaptureError(error: Error): Promise<void> {
-  const current = await getCaptureState();
-  await saveCaptureState({
-    ...current,
-    error: error.message,
-    phase: 'error'
-  });
-}
-
-function enqueueCaptureError(error: Error, expectedGeneration?: number): void {
-  void serializeCaptureOperation(async () => {
-    if (expectedGeneration !== undefined && expectedGeneration !== captureGeneration) {
-      return;
-    }
-    await reportCaptureError(error);
-  }).catch(() => undefined);
-}
-
-function resetCaptureBuffers(): void {
-  capturedBrowserAudio.clear();
+function clearCapture(generation: number): void {
+  if (generation !== captureGeneration) return;
+  captureGeneration += 1;
+  relay = undefined;
+  sessionId = undefined;
+  tabTitle = undefined;
+  tabUrl = undefined;
+  tunnelSessionId = undefined;
   downsampler.reset();
 }
 
+function normalizeStartError(error: unknown): DesktopAudioRelayError {
+  if (error instanceof DesktopAudioRelayError) return error;
+  if (error instanceof DOMException && error.name === 'NotAllowedError') {
+    return new DesktopAudioRelayError('CAPTURE_DENIED');
+  }
+  return new DesktopAudioRelayError('STREAM_ID_EXPIRED', undefined, undefined, { cause: error });
+}
+
+function toRelayError(error: unknown): DesktopAudioRelayError {
+  return error instanceof DesktopAudioRelayError
+    ? error
+    : new DesktopAudioRelayError('ASR_INFERENCE_FAILED', undefined, undefined, { cause: error });
+}
+
 function asError(error: unknown): Error {
-  return error instanceof Error ? error : new Error('Voice Vac 标签页收录失败。');
+  return error instanceof Error ? error : new Error('Voice VAC could not relay this tab audio.');
 }
 
 function serializeCaptureOperation<T>(operation: () => Promise<T>): Promise<T> {
   const result = operationTail.then(operation, operation);
   operationTail = result.then(() => undefined, () => undefined);
   return result;
+}
+
+function enqueueStateUpdate(operation: () => Promise<void>): Promise<void> {
+  const result = stateUpdateTail.then(operation, operation);
+  stateUpdateTail = result.catch(() => undefined);
+  return result;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

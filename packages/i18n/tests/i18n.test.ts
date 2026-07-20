@@ -66,12 +66,12 @@ describe('message catalogs', () => {
     expect(en['error.transcriptionTimedOut']).toContain('timed out');
   });
 
-  it('explains the optional App text-only sync boundary in both popup languages', () => {
+  it('explains the target-tab to local-App audio boundary in both popup languages', () => {
     expect(messages['zh-CN']['connection.browserHint']).toBe(
-      'App 可选。音频始终在浏览器本地转写；App 打开时只自动同步完成的文字。',
+      '目标标签页音频只进入本机 Voice VAC App。',
     );
     expect(messages.en['connection.browserHint']).toBe(
-      'The App is optional. Audio always stays browser-local; when the App is open, only completed text auto-syncs.',
+      'The target tab audio enters only the local Voice VAC App.',
     );
   });
 });

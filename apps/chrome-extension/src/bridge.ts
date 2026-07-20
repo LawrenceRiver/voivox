@@ -85,14 +85,14 @@ export function normalizeCaptureState(value: unknown): CaptureState {
         : 'idle'
   };
 
-  if (record.canRetry === true) state.canRetry = true;
+  if (typeof record.canRetry === 'boolean') state.canRetry = record.canRetry;
   if (typeof record.error === 'string') state.error = record.error;
   const errorCode = normalizeCaptureErrorCode(record.errorCode);
   if (errorCode) state.errorCode = errorCode;
   if (typeof record.progress === 'number' && record.progress >= 0 && record.progress <= 100) {
     state.progress = record.progress;
   }
-  if (record.route === 'browser-local') state.route = record.route;
+  if (record.route === 'desktop-local') state.route = record.route;
   if (typeof record.sessionId === 'string') state.sessionId = record.sessionId;
   if (typeof record.tabTitle === 'string') state.tabTitle = record.tabTitle;
   if (typeof record.tabUrl === 'string') state.tabUrl = record.tabUrl;

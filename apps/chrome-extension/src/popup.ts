@@ -160,8 +160,8 @@ function render(): void {
   languageButton.setAttribute('aria-label', locale === 'zh-CN' ? 'Switch to English' : '切换到中文');
 
   modeLabel.textContent = t('model.label');
-  setModeText(modeFast, t('model.fast'), '≈ 45 MB');
-  setModeText(modeQuality, t('model.quality'), '≈ 80 MB');
+  setModeText(modeFast, t('model.fast'), locale === 'zh-CN' ? '低延迟' : 'Low latency');
+  setModeText(modeQuality, t('model.quality'), locale === 'zh-CN' ? '更多上下文' : 'More context');
   modeFast.setAttribute('aria-pressed', String(captureState.mode === 'fast'));
   modeQuality.setAttribute('aria-pressed', String(captureState.mode === 'quality'));
   modeHint.textContent = t(captureState.mode === 'fast' ? 'model.fastHint' : 'model.qualityHint');

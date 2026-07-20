@@ -23,19 +23,19 @@ describe('normalizeCaptureState', () => {
     });
   });
 
-  it('preserves a valid completed browser-local transcript', () => {
+  it('preserves a valid completed desktop-local transcript', () => {
     expect(normalizeCaptureState({
       active: false,
       mode: 'fast',
       phase: 'complete',
-      route: 'browser-local',
+      route: 'desktop-local',
       tabTitle: 'MV',
       transcript: '歌词转写'
     })).toEqual({
       active: false,
       mode: 'fast',
       phase: 'complete',
-      route: 'browser-local',
+      route: 'desktop-local',
       tabTitle: 'MV',
       transcript: '歌词转写'
     });
@@ -97,7 +97,7 @@ describe('normalizeCaptureState', () => {
       errorCode: 'TRANSCRIPTION_TIMEOUT',
       mode: 'quality',
       phase: 'error',
-      route: 'browser-local'
+      route: 'desktop-local'
     })).toMatchObject({
       canRetry: true,
       errorCode: 'TRANSCRIPTION_TIMEOUT',
@@ -120,6 +120,23 @@ describe('normalizeCaptureState', () => {
       mode: 'quality',
       phase: 'error'
     })).not.toHaveProperty('errorCode');
+  });
+
+  it('preserves exact stable local Qwen and relay failure codes', () => {
+    for (const errorCode of [
+      'ASR_MODEL_MISSING',
+      'ASR_INFERENCE_TIMEOUT',
+      'AUDIO_SEQUENCE_MISMATCH',
+      'AUDIO_RELAY_BACKPRESSURE'
+    ] as const) {
+      expect(normalizeCaptureState({
+        active: false,
+        errorCode,
+        mode: 'quality',
+        phase: 'error',
+        route: 'desktop-local'
+      })).toMatchObject({ errorCode, route: 'desktop-local' });
+    }
   });
 
   it('drops invalid progress, route, and error fields', () => {

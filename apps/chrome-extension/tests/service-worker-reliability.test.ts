@@ -19,7 +19,7 @@ describe('service worker capture reliability', () => {
       active: true,
       mode: 'quality',
       phase: 'capturing',
-      route: 'browser-local',
+      route: 'desktop-local',
       sessionId: 'lost-session',
       tabTitle: 'Lost tab'
     });
@@ -37,7 +37,7 @@ describe('service worker capture reliability', () => {
       active: true,
       mode: 'fast',
       phase: 'capturing',
-      route: 'browser-local',
+      route: 'desktop-local',
       sessionId: 'browser-runtime-state',
       tabTitle: 'Runtime-only offscreen tab'
     };
@@ -59,7 +59,7 @@ describe('service worker capture reliability', () => {
       { active: false, mode: 'quality', phase: 'idle' },
       false,
       undefined,
-      false,
+      true,
       false,
       false,
       false,
@@ -68,16 +68,21 @@ describe('service worker capture reliability', () => {
 
     const state = await harness.dispatch({ target: 'service-worker', type: 'capture:toggle' });
 
-    expect(state).toMatchObject({ active: true, phase: 'capturing', route: 'browser-local' });
+    expect(state).toMatchObject({ active: true, phase: 'capturing', route: 'desktop-local' });
     expect(harness.savedState).toEqual(state);
   });
 
-  it('keeps Chrome tab audio browser-local when the App ASR is ready', async () => {
+  it('relays Chrome tab audio to the authenticated local App ASR', async () => {
     const harness = await createHarness(
       { active: false, mode: 'quality', phase: 'idle' },
       false,
       undefined,
-      true
+      true,
+      false,
+      false,
+      false,
+      false,
+      'tunnel-1'
     );
 
     const state = await harness.dispatch({ target: 'service-worker', type: 'capture:toggle' });
@@ -87,14 +92,15 @@ describe('service worker capture reliability', () => {
         baseUrl: 'http://127.0.0.1:43817',
         token: 'restricted-token'
       },
-      route: 'browser-local',
+      route: 'desktop-local',
+      tunnelSessionId: 'tunnel-1',
       type: 'audio:start'
     });
-    expect(state).toMatchObject({ active: true, route: 'browser-local' });
+    expect(state).toMatchObject({ active: true, route: 'desktop-local' });
     expect(harness.requestedUrls).toHaveLength(0);
   });
 
-  it('clears an obsolete desktop-local state without contacting the App', async () => {
+  it('clears a stale desktop-local state when its offscreen document is gone', async () => {
     const harness = await createHarness({
       active: true,
       mode: 'quality',
@@ -109,6 +115,21 @@ describe('service worker capture reliability', () => {
     expect(state).toEqual({ active: false, mode: 'quality', phase: 'idle' });
   });
 
+  it('does not capture tab audio while the authenticated local App is unavailable', async () => {
+    const harness = await createHarness(
+      { active: false, mode: 'quality', phase: 'idle' },
+      false,
+      undefined,
+      false
+    );
+
+    const state = await harness.dispatch({ target: 'service-worker', type: 'capture:toggle' });
+
+    expect(state).toMatchObject({ active: false, phase: 'error' });
+    expect(harness.streamTabIds).toEqual([]);
+    expect(harness.offscreenMessages).toEqual([]);
+  });
+
   it('does not offer a retry after the offscreen audio buffer was reclaimed', async () => {
     const harness = await createHarness({
       active: false,
@@ -116,14 +137,14 @@ describe('service worker capture reliability', () => {
       error: 'model failed',
       mode: 'quality',
       phase: 'error',
-      route: 'browser-local',
+      route: 'desktop-local',
       sessionId: 'lost-buffer'
     });
 
     const state = await harness.dispatch({ target: 'service-worker', type: 'capture:retry' });
 
     expect(state).toMatchObject({ active: false, canRetry: false, phase: 'error' });
-    expect(state.error).toContain('音频');
+    expect(state.error).toContain('audio');
     expect(harness.offscreenMessages).toHaveLength(0);
   });
 
@@ -135,7 +156,7 @@ describe('service worker capture reliability', () => {
           active: false,
           mode: 'quality',
           phase,
-          route: 'browser-local',
+          route: 'desktop-local',
           sessionId: 'browser-processing'
         },
         false,
@@ -149,7 +170,7 @@ describe('service worker capture reliability', () => {
       const state = await harness.dispatch({ target: 'service-worker', type: 'capture:toggle' });
 
       expect(harness.offscreenMessages.at(-1)).toMatchObject({ type: 'audio:cancel' });
-      expect(state).toMatchObject({ canRetry: true, phase: 'error', route: 'browser-local' });
+      expect(state).toMatchObject({ canRetry: true, phase: 'error', route: 'desktop-local' });
     }
   );
 
@@ -174,7 +195,7 @@ describe('service worker capture reliability', () => {
       active: false,
       mode: 'quality',
       phase: 'complete',
-      route: 'browser-local',
+      route: 'desktop-local',
       sessionId: 'browser-session',
       transcript: 'short tab audio'
     };
@@ -195,7 +216,7 @@ describe('service worker capture reliability', () => {
       { active: false, mode: 'quality', phase: 'idle' },
       false,
       undefined,
-      false,
+      true,
       true,
       true
     );
@@ -212,8 +233,37 @@ describe('service worker capture reliability', () => {
     expect(harness.savedState).toMatchObject({ active: true, phase: 'capturing' });
   });
 
+  it('preserves an exact stable local App start error in CaptureState', async () => {
+    const harness = await createHarness(
+      { active: false, mode: 'quality', phase: 'idle' },
+      false,
+      undefined,
+      true,
+      true
+    );
+
+    const state = await harness.dispatch({ target: 'service-worker', type: 'capture:toggle' });
+
+    expect(state).toMatchObject({
+      active: false,
+      canRetry: false,
+      errorCode: 'ASR_MODEL_MISSING',
+      phase: 'error'
+    });
+  });
+
   it('arms on popup request without capture and retains that tab when focus changes', async () => {
-    const harness = await createHarness({ active: false, mode: 'quality', phase: 'idle' });
+    const harness = await createHarness(
+      { active: false, mode: 'quality', phase: 'idle' },
+      false,
+      undefined,
+      true,
+      false,
+      false,
+      false,
+      false,
+      ''
+    );
 
     const armed = await harness.dispatch({ target: 'service-worker', type: 'tab:arm' }) as unknown as {
       captureState: CaptureState;
@@ -324,7 +374,7 @@ describe('service worker capture reliability', () => {
       active: true,
       mode: 'quality',
       phase: 'capturing',
-      route: 'browser-local',
+      route: 'desktop-local',
       sessionId: 'old-capture'
     };
     const harness = await createHarness(
@@ -347,7 +397,7 @@ describe('service worker capture reliability', () => {
       active: true,
       mode: 'quality',
       phase: 'capturing',
-      route: 'browser-local',
+      route: 'desktop-local',
       sessionId: 'old-capture'
     };
     const transcribing: CaptureState = {
@@ -374,7 +424,7 @@ describe('service worker capture reliability', () => {
       active: false,
       mode: 'quality',
       phase: 'complete',
-      route: 'browser-local',
+      route: 'desktop-local',
       sessionId: 'old-capture',
       transcript: 'late old transcript'
     };
@@ -425,7 +475,7 @@ describe('service worker capture reliability', () => {
       active: true,
       mode: 'quality',
       phase: 'capturing',
-      route: 'browser-local',
+      route: 'desktop-local',
       sessionId: 'old-capture',
       tunnelSessionId: 'tunnel-old'
     };
@@ -454,7 +504,7 @@ describe('service worker capture reliability', () => {
       active: false,
       mode: 'quality',
       phase: 'complete',
-      route: 'browser-local',
+      route: 'desktop-local',
       sessionId: 'old-capture',
       transcript: 'late old completion'
     };
@@ -484,7 +534,7 @@ describe('service worker capture reliability', () => {
       active: true,
       mode: 'quality',
       phase: 'capturing',
-      route: 'browser-local',
+      route: 'desktop-local',
       sessionId: 'old-capture',
       tunnelSessionId: 'tunnel-old'
     };
@@ -513,7 +563,7 @@ describe('service worker capture reliability', () => {
       active: false,
       mode: 'quality',
       phase: 'complete',
-      route: 'browser-local',
+      route: 'desktop-local',
       sessionId: 'old-capture',
       transcript: 'late after retry failure'
     };
@@ -569,7 +619,7 @@ async function createHarness(
   initialState: CaptureState,
   delayStart = false,
   stateAfterStart?: CaptureState,
-  nativeDesktopReady = false,
+  nativeDesktopReady = true,
   failFirstStart = false,
   delayErrorWrite = false,
   initialHasOffscreenDocument = false,
@@ -650,7 +700,13 @@ async function createHarness(
       status: 'armed',
       armedAt: 1,
       updatedAt: 1,
-      ...(targetTunnelSessionId ? { tunnelSessionId: targetTunnelSessionId } : {})
+      ...(targetTunnelSessionId === ''
+        ? {}
+        : targetTunnelSessionId
+        ? { tunnelSessionId: targetTunnelSessionId }
+        : nativeDesktopReady
+          ? { tunnelSessionId: 'tunnel-default' }
+          : {})
     }
   };
 
@@ -677,15 +733,20 @@ async function createHarness(
           startAttempts += 1;
           await startGate;
           if (failFirstStart && startAttempts === 1) {
-            return { error: 'first start failed' };
+            return {
+              error: 'The local Qwen3-ASR model is not installed.',
+              errorCode: 'ASR_MODEL_MISSING',
+              retryable: false
+            };
           }
           const startedState = stateAfterStart ?? {
             active: true,
             mode: message.mode === 'fast' ? 'fast' : 'quality',
             phase: 'capturing',
-            route: 'browser-local',
+            route: 'desktop-local',
             sessionId: 'browser-session',
-            tabTitle: 'Current tab'
+            tabTitle: 'Current tab',
+            tunnelSessionId: message.tunnelSessionId as string
           };
           if (publishStateDuringStart) {
             await new Promise<CaptureState>((resolve, reject) => {
@@ -715,7 +776,7 @@ async function createHarness(
             canRetry: true,
             error: 'transcription cancelled',
             phase: 'error',
-            route: 'browser-local'
+            route: 'desktop-local'
           };
           return { state };
         }
@@ -805,7 +866,10 @@ async function createHarness(
       method: init?.method ?? 'GET',
       url: String(input)
     });
-    return new Response(JSON.stringify({ id: targetTunnelSessionId }), { status: currentBridgeStatus });
+    return new Response(
+      JSON.stringify({ id: targetTunnelSessionId || 'tunnel-created' }),
+      { status: currentBridgeStatus }
+    );
   }));
   await import('../src/service-worker.js');
   if (!listener) {

@@ -1,73 +1,75 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CaptureState } from '../src/bridge.js';
+import type {
+  DesktopAudioRelayError,
+  DesktopTranscriptSnapshot
+} from '../src/desktop-audio-relay.js';
 
-const asrMock = vi.hoisted(() => {
-  class OperationError extends Error {
-    constructor(readonly code: 'cancelled' | 'timeout') {
-      super(code === 'cancelled' ? 'Browser-local transcription was cancelled.' : 'Browser-local transcription timed out.');
-      this.name = 'AsrWorkerOperationError';
-    }
-  }
+const relayMock = vi.hoisted(() => ({
+  instances: [] as FakeRelay[],
+  startError: undefined as Error | undefined,
+  stopError: undefined as Error | undefined,
+  stopResult: {
+    revision: 2,
+    segments: [{ startMs: 0, endMs: 1_000, text: '本地 Qwen 转录' }],
+    sessionId: 'session_1',
+    status: 'complete',
+    transcript: '本地 Qwen 转录'
+  } satisfies DesktopTranscriptSnapshot
+}));
 
+type FakeRelay = {
+  append: ReturnType<typeof vi.fn>;
+  cancel: ReturnType<typeof vi.fn>;
+  emitFailure: (error: DesktopAudioRelayError) => Promise<void>;
+  emitSnapshot: (snapshot: DesktopTranscriptSnapshot) => Promise<void>;
+  start: ReturnType<typeof vi.fn>;
+  stop: ReturnType<typeof vi.fn>;
+};
+
+vi.mock('../src/desktop-audio-relay.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/desktop-audio-relay.js')>();
   return {
-    OperationError,
-    instances: [] as Array<{
-      audios: Float32Array[];
-      cancel: ReturnType<typeof vi.fn>;
-      dispose: ReturnType<typeof vi.fn>;
-      triggerFatal: () => void;
-    }>,
-    results: [] as Array<string | Error | { pending: true }>
+    ...actual,
+    DesktopAudioRelay: class {
+      readonly append = vi.fn();
+      readonly cancel = vi.fn();
+      readonly start = vi.fn(async () => {
+        if (relayMock.startError) throw relayMock.startError;
+        return 'session_1';
+      });
+      readonly stop = vi.fn(async () => {
+        if (relayMock.stopError) throw relayMock.stopError;
+        return relayMock.stopResult;
+      });
+      private readonly onDelta?: (snapshot: DesktopTranscriptSnapshot) => void | Promise<void>;
+      private readonly onFailure?: (error: DesktopAudioRelayError) => void | Promise<void>;
+
+      constructor(options: {
+        onDelta?: (snapshot: DesktopTranscriptSnapshot) => void | Promise<void>;
+        onFailure?: (error: DesktopAudioRelayError) => void | Promise<void>;
+      }) {
+        this.onDelta = options.onDelta;
+        this.onFailure = options.onFailure;
+        relayMock.instances.push(this);
+      }
+
+      async emitFailure(error: DesktopAudioRelayError): Promise<void> {
+        await this.onFailure?.(error);
+      }
+
+      async emitSnapshot(snapshot: DesktopTranscriptSnapshot): Promise<void> {
+        await this.onDelta?.(snapshot);
+      }
+    }
   };
 });
 
-vi.mock('../src/asr-worker-client.js', () => ({
-  AsrWorkerOperationError: asrMock.OperationError,
-  AsrWorkerClient: class {
-    readonly audios: Float32Array[] = [];
-    readonly cancel = vi.fn(() => {
-      const error = new asrMock.OperationError('cancelled');
-      this.pendingReject?.(error);
-      this.pendingReject = undefined;
-      this.onFatalError?.(error);
-    });
-    readonly dispose = vi.fn(async () => undefined);
-    private readonly onFatalError?: (error: Error) => void;
-    private pendingReject?: (error: Error) => void;
-
-    constructor(
-      _worker: unknown,
-      _onStateChange: unknown,
-      onFatalError?: (error: Error) => void
-    ) {
-      this.onFatalError = onFatalError;
-      asrMock.instances.push(this);
-    }
-
-    async transcribe(audio: Float32Array): Promise<string> {
-      this.audios.push(audio.slice());
-      const result = asrMock.results.shift() ?? 'browser transcript';
-      if (result instanceof Error) {
-        throw result;
-      }
-      if (typeof result !== 'string') {
-        return new Promise<string>((_resolve, reject) => {
-          this.pendingReject = reject;
-        });
-      }
-      return result;
-    }
-
-    triggerFatal(): void {
-      this.onFatalError?.(new Error('old worker crashed late'));
-    }
-  }
-}));
-
 type OffscreenResponse = {
   error?: string;
-  lostDesktopSessionId?: string;
+  errorCode?: string;
+  retryable?: boolean;
   sessionId?: string;
   state?: CaptureState;
 };
@@ -78,248 +80,191 @@ type RuntimeListener = (
   sendResponse: (response: OffscreenResponse) => void
 ) => boolean | undefined;
 
-describe('offscreen capture reliability', () => {
+describe('offscreen desktop PCM relay', () => {
   beforeEach(() => {
-    vi.useRealTimers();
     vi.resetModules();
     vi.unstubAllGlobals();
-    asrMock.instances.length = 0;
-    asrMock.results.length = 0;
+    relayMock.instances.length = 0;
+    relayMock.startError = undefined;
+    relayMock.stopError = undefined;
   });
 
-  it('clears stale active storage when asked to stop without a live capture', async () => {
+  it('acquires only the authorized tab source and keeps the captured tab silent at zero gain', async () => {
     const harness = await createHarness();
+
+    await harness.dispatch(startMessage());
+
+    expect(harness.getUserMedia).toHaveBeenCalledWith({
+      audio: {
+        mandatory: {
+          chromeMediaSource: 'tab',
+          chromeMediaSourceId: 'stream-id'
+        }
+      }
+    });
+    expect(harness.lastGain?.gain.value).toBe(0);
+    expect(harness.workerConstructed).toBe(false);
+  });
+
+  it('starts the desktop capture with the armed tunnel and canonical page URL', async () => {
+    const harness = await createHarness();
+
+    const result = await harness.dispatch(startMessage());
+
+    expect(result.sessionId).toBe('session_1');
+    expect(relayMock.instances[0]?.start).toHaveBeenCalledWith({
+      mode: 'quality',
+      tabTitle: 'Target video',
+      tabUrl: 'https://example.test/watch',
+      tunnelSessionId: 'tunnel-1'
+    });
+    expect(harness.savedState).toMatchObject({
+      active: true,
+      phase: 'capturing',
+      route: 'desktop-local',
+      sessionId: 'session_1',
+      tunnelSessionId: 'tunnel-1'
+    });
+  });
+
+  it('relays downsampled worklet audio without constructing a browser ASR Worker', async () => {
+    const harness = await createHarness({ sampleRate: 48_000 });
+    await harness.dispatch(startMessage());
+
+    harness.emitAudio(new Float32Array(480).fill(0.25));
+
+    const appended = relayMock.instances[0]?.append.mock.calls[0]?.[0] as Float32Array;
+    expect(appended).toBeInstanceOf(Float32Array);
+    expect(appended).toHaveLength(160);
+    expect(harness.workerConstructed).toBe(false);
+  });
+
+  it('drains the relay on stop and publishes the complete desktop transcript', async () => {
+    const harness = await createHarness();
+    await harness.dispatch(startMessage());
+    harness.emitAudio(new Float32Array(200).fill(0.1));
 
     const stopped = await harness.dispatch({ target: 'offscreen', type: 'audio:stop' });
 
-    expect(stopped.state).toEqual({ active: false, mode: 'quality', phase: 'idle' });
-    expect(harness.savedState).toEqual(stopped.state);
-  });
-
-  it('keeps the ASR worker unloaded while it is only capturing audio', async () => {
-    const harness = await createHarness();
-
-    await harness.dispatch(startMessage('browser-local'));
-
-    expect(asrMock.instances).toHaveLength(0);
-  });
-
-  it('publishes the capturing state before acknowledging startup', async () => {
-    const harness = await createHarness({
-      initialState: { active: false, mode: 'quality', phase: 'idle' }
+    expect(relayMock.instances[0]?.stop).toHaveBeenCalledOnce();
+    expect(stopped.state).toMatchObject({
+      active: false,
+      phase: 'transcribing',
+      route: 'desktop-local'
     });
-
-    const started = await harness.dispatch(startMessage('browser-local'));
-
+    await harness.waitForState((state) => state.phase === 'complete');
     expect(harness.savedState).toMatchObject({
-      active: true,
-      mode: 'quality',
-      phase: 'capturing',
-      route: 'browser-local',
-      sessionId: started.sessionId,
-      tabTitle: 'Test tab'
+      active: false,
+      phase: 'complete',
+      route: 'desktop-local',
+      transcript: '本地 Qwen 转录'
     });
+    expect(harness.hasActiveAudioHandler()).toBe(false);
   });
 
-  it('persists state through runtime messaging when offscreen storage APIs are unavailable', async () => {
-    const harness = await createHarness({
-      initialState: { active: false, mode: 'quality', phase: 'idle' },
-      offscreenStorageAvailable: false
-    });
-
-    const started = await harness.dispatch(startMessage('browser-local'));
-
-    expect(started.sessionId).toMatch(/^browser_/u);
-    expect(harness.savedState).toMatchObject({
-      active: true,
-      phase: 'capturing',
-      route: 'browser-local',
-      sessionId: started.sessionId
-    });
-    expect(harness.stateMessages.map((message) => message.type)).toContain('capture-state:save');
-  });
-
-  it('serializes start and stop operations', async () => {
-    const harness = await createHarness({ deferMedia: true });
-    asrMock.results.push('serialized transcript');
-    const starting = harness.dispatch(startMessage('browser-local'));
-    const stopping = harness.dispatch({ target: 'offscreen', type: 'audio:stop' });
-
-    harness.releaseMedia();
-    const started = await starting;
-    const stopped = await stopping;
-
-    expect(started.sessionId).toMatch(/^browser_/u);
-    expect(stopped.state).toMatchObject({ active: false, phase: 'error', route: 'browser-local' });
-  });
-
-  it('automatically stops and transcribes when the captured tab track ends', async () => {
+  it('automatically drains when the captured tab track ends', async () => {
     const harness = await createHarness();
-    asrMock.results.push('automatic transcript');
-    await harness.dispatch(startMessage('browser-local'));
-    harness.emitAudio(new Float32Array(2_000).fill(0.02));
+    await harness.dispatch(startMessage());
 
     harness.track.dispatchEvent(new Event('ended'));
 
-    await harness.waitForState((state) => state.transcript === 'automatic transcript');
-    expect(harness.savedState).toMatchObject({ active: false, phase: 'complete' });
+    await harness.waitForState((state) => state.phase === 'complete');
+    expect(relayMock.instances[0]?.stop).toHaveBeenCalledOnce();
   });
 
-  it('ignores an already queued audio message from a released capture generation', async () => {
+  it('maps an exact stable desktop failure into CaptureState', async () => {
+    const { DesktopAudioRelayError } = await import('../src/desktop-audio-relay.js');
     const harness = await createHarness();
-    asrMock.results.push('first transcript', 'second transcript');
-    await harness.dispatch(startMessage('browser-local'));
-    const dispatchReleasedAudio = harness.captureAudioDispatcher();
-    harness.emitAudio(new Float32Array(2_000).fill(0.02));
-    await harness.dispatch({ target: 'offscreen', type: 'audio:stop' });
-    await harness.waitForState((state) => state.transcript === 'first transcript');
-
-    await harness.dispatch(startMessage('browser-local'));
-    dispatchReleasedAudio(new Float32Array(1_000).fill(0.75));
-    const currentAudio = new Float32Array(2_000).fill(0.03);
-    harness.emitAudio(currentAudio);
-    await harness.dispatch({ target: 'offscreen', type: 'audio:stop' });
-    await harness.waitForState((state) => state.transcript === 'second transcript');
-
-    expect(asrMock.instances[0]?.audios[1]).toEqual(currentAudio);
-  });
-
-  it('detaches the audio message handler when the capture graph is released', async () => {
-    const harness = await createHarness();
-    await harness.dispatch(startMessage('browser-local'));
-
-    expect(harness.hasActiveAudioHandler()).toBe(true);
-    await harness.dispatch({ target: 'offscreen', type: 'audio:stop' });
-
-    expect(harness.hasActiveAudioHandler()).toBe(false);
-  });
-
-  it('rejects the obsolete desktop audio route before opening an App session', async () => {
-    const harness = await createHarness();
-
-    const started = await harness.dispatch(startMessage('desktop-local'));
-
-    expect(started).toEqual({ error: 'Chrome 标签页只能在浏览器本地转写。' });
-    expect(harness.requestedUrls).toHaveLength(0);
-    expect(harness.hasActiveAudioHandler()).toBe(false);
-  });
-
-  it('disposes an idle model after two minutes and recreates it for retry without losing audio', async () => {
-    vi.useFakeTimers();
-    const harness = await createHarness();
-    asrMock.results.push(new Error('temporary model failure'), 'retry transcript');
-    await harness.dispatch(startMessage('browser-local'));
-    const captured = new Float32Array(2_000).fill(0.02);
-    harness.emitAudio(captured);
-    await harness.dispatch({ target: 'offscreen', type: 'audio:stop' });
-    await flushMicrotasks();
-    expect(harness.savedState).toMatchObject({ canRetry: true, phase: 'error' });
-    expect(asrMock.instances).toHaveLength(1);
-
-    await vi.advanceTimersByTimeAsync(120_000);
-    expect(asrMock.instances[0]?.dispose).toHaveBeenCalledOnce();
-
-    const retrying = await harness.dispatch({ target: 'offscreen', type: 'audio:retry' });
-    expect(retrying.state).toMatchObject({ canRetry: false, phase: 'transcribing' });
-    await flushMicrotasks();
-
-    expect(asrMock.instances).toHaveLength(2);
-    expect(asrMock.instances[1]?.audios[0]).toEqual(captured);
-    expect(harness.savedState).toMatchObject({ phase: 'complete', transcript: 'retry transcript' });
-  });
-
-  it('cancels processing, keeps captured audio, and recreates the worker for retry', async () => {
-    const harness = await createHarness();
-    asrMock.results.push({ pending: true }, 'retry after cancellation');
-    await harness.dispatch(startMessage('browser-local'));
-    const captured = new Float32Array(2_000).fill(0.02);
-    harness.emitAudio(captured);
+    await harness.dispatch(startMessage());
+    relayMock.stopError = new DesktopAudioRelayError(
+      'ASR_MODEL_MISSING',
+      'The local Qwen3-ASR model is not installed.',
+      false
+    );
 
     const stopped = await harness.dispatch({ target: 'offscreen', type: 'audio:stop' });
-    expect(stopped.state).toMatchObject({ phase: 'transcribing', route: 'browser-local' });
-    const cancelled = await harness.dispatch({ target: 'offscreen', type: 'audio:cancel' });
 
-    expect(cancelled.state).toMatchObject({
-      canRetry: true,
-      errorCode: 'TRANSCRIPTION_CANCELLED',
-      phase: 'error',
-      route: 'browser-local'
+    expect(stopped.state).toMatchObject({
+      active: false,
+      phase: 'transcribing',
+      route: 'desktop-local'
     });
-    expect(asrMock.instances[0]?.cancel).toHaveBeenCalledOnce();
-
-    const retrying = await harness.dispatch({ target: 'offscreen', type: 'audio:retry' });
-    expect(retrying.state).toMatchObject({ canRetry: false, phase: 'transcribing' });
-    await harness.waitForState((state) => state.transcript === 'retry after cancellation');
-
-    expect(asrMock.instances).toHaveLength(2);
-    expect(asrMock.instances[1]?.audios[0]).toEqual(captured);
+    await harness.waitForState((state) => state.phase === 'error');
+    expect(harness.savedState).toMatchObject({
+      active: false,
+      canRetry: false,
+      errorCode: 'ASR_MODEL_MISSING',
+      phase: 'error',
+      route: 'desktop-local'
+    });
   });
 
-  it('ignores a late fatal event from a worker that was already replaced', async () => {
-    vi.useFakeTimers();
+  it('publishes an exact stable start failure before releasing the captured tab', async () => {
+    const { DesktopAudioRelayError } = await import('../src/desktop-audio-relay.js');
+    relayMock.startError = new DesktopAudioRelayError(
+      'ASR_MODEL_MISSING',
+      'The local Qwen3-ASR model is not installed.',
+      false
+    );
     const harness = await createHarness();
-    asrMock.results.push(new Error('first worker failed'), 'replacement transcript');
-    await harness.dispatch(startMessage('browser-local'));
-    harness.emitAudio(new Float32Array(2_000).fill(0.02));
-    await harness.dispatch({ target: 'offscreen', type: 'audio:stop' });
-    await flushMicrotasks();
-    await vi.advanceTimersByTimeAsync(120_000);
 
-    await harness.dispatch({ target: 'offscreen', type: 'audio:retry' });
-    await flushMicrotasks();
-    expect(asrMock.instances).toHaveLength(2);
-    asrMock.instances[0]?.triggerFatal();
+    const response = await harness.dispatch(startMessage());
 
-    await vi.advanceTimersByTimeAsync(120_000);
-    expect(asrMock.instances[1]?.dispose).toHaveBeenCalledOnce();
+    expect(response).toMatchObject({
+      error: 'The local Qwen3-ASR model is not installed.',
+      errorCode: 'ASR_MODEL_MISSING',
+      retryable: false
+    });
+    expect(harness.savedState).toMatchObject({
+      active: false,
+      errorCode: 'ASR_MODEL_MISSING',
+      phase: 'error',
+      route: 'desktop-local'
+    });
+  });
+
+  it('rejects every route except authenticated desktop-local before capture', async () => {
+    const harness = await createHarness();
+    const response = await harness.dispatch({ ...startMessage(), route: 'browser-local' });
+
+    expect(response).toEqual({ error: 'Voice VAC requires the authenticated local App relay.' });
+    expect(harness.getUserMedia).not.toHaveBeenCalled();
+    expect(relayMock.instances).toHaveLength(0);
   });
 });
 
-function startMessage(route: 'browser-local' | 'desktop-local'): Record<string, unknown> {
+function startMessage(): Record<string, unknown> {
   return {
-    bridge: route === 'desktop-local'
-      ? { baseUrl: 'http://127.0.0.1:43817', token: 'restricted-token' }
-      : undefined,
+    bridge: { baseUrl: 'http://127.0.0.1:43817', token: 'restricted-token' },
     mode: 'quality',
-    route,
+    route: 'desktop-local',
     streamId: 'stream-id',
-    tabTitle: 'Test tab',
+    tabTitle: 'Target video',
+    tabUrl: 'https://example.test/watch',
     target: 'offscreen',
+    tunnelSessionId: 'tunnel-1',
     type: 'audio:start'
   };
 }
 
-async function createHarness(options: {
-  deferMedia?: boolean;
-  initialState?: CaptureState;
-  offscreenStorageAvailable?: boolean;
-} = {}): Promise<{
-  captureAudioDispatcher: () => (audio: Float32Array) => void;
+async function createHarness(options: { sampleRate?: number } = {}): Promise<{
   dispatch: (message: unknown) => Promise<OffscreenResponse>;
   emitAudio: (audio: Float32Array) => void;
+  getUserMedia: ReturnType<typeof vi.fn>;
   hasActiveAudioHandler: () => boolean;
-  releaseMedia: () => void;
-  requestedUrls: string[];
-  stateMessages: Array<Record<string, unknown>>;
+  lastGain?: GainNode;
   readonly savedState: CaptureState;
   track: FakeTrack;
   waitForState: (predicate: (state: CaptureState) => boolean) => Promise<void>;
+  workerConstructed: boolean;
 }> {
-  vi.resetModules();
   let listener: RuntimeListener | undefined;
-  let state: CaptureState = options.initialState
-    ?? { active: true, mode: 'quality', phase: 'capturing' };
-  const extraStorage: Record<string, unknown> = {};
+  let state: CaptureState = { active: false, mode: 'quality', phase: 'armed' };
   let activeNode: FakeAudioWorkletNode | undefined;
-  let releaseMedia: () => void = () => undefined;
-  const mediaGate = options.deferMedia
-    ? new Promise<void>((resolve) => {
-        releaseMedia = resolve;
-      })
-    : Promise.resolve();
+  let lastContext: FakeAudioContext | undefined;
+  let workerConstructed = false;
   const track = new FakeTrack();
-  const requestedUrls: string[] = [];
-  const stateMessages: Array<Record<string, unknown>> = [];
+  const getUserMedia = vi.fn(async () => ({ getTracks: () => [track] }));
 
   class TestAudioWorkletNode extends FakeAudioWorkletNode {
     constructor() {
@@ -327,110 +272,73 @@ async function createHarness(options: {
       activeNode = this;
     }
   }
+  class TestAudioContext extends FakeAudioContext {
+    constructor() {
+      super(options.sampleRate ?? 16_000);
+      lastContext = this;
+    }
+  }
 
-  vi.stubGlobal('Worker', class {});
-  vi.stubGlobal('AudioWorkletNode', TestAudioWorkletNode);
-  vi.stubGlobal('AudioContext', FakeAudioContext);
-  vi.stubGlobal('navigator', {
-    mediaDevices: {
-      getUserMedia: vi.fn(async () => {
-        await mediaGate;
-        return { getTracks: () => [track] };
-      })
+  vi.stubGlobal('Worker', class {
+    constructor() {
+      workerConstructed = true;
     }
   });
-  const chromeStub: Record<string, unknown> = {
+  vi.stubGlobal('AudioWorkletNode', TestAudioWorkletNode);
+  vi.stubGlobal('AudioContext', TestAudioContext);
+  vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
+  vi.stubGlobal('chrome', {
     runtime: {
-      getURL: (path: string) => `chrome-extension://voivox/${path}`,
+      getURL: (path: string) => `chrome-extension://voice-vac/${path}`,
       onMessage: {
         addListener: vi.fn((registered: RuntimeListener) => {
           listener = registered;
         })
       },
       sendMessage: vi.fn(async (message: Record<string, unknown>) => {
-        stateMessages.push(message);
-        if (message.type === 'capture-state:get') {
-          return state;
-        }
+        if (message.type === 'capture-state:get') return state;
         if (message.type === 'capture-state:save') {
           state = message.state as CaptureState;
           return state;
         }
-        throw new Error(`Unexpected runtime message: ${String(message.type)}`);
+        throw new Error(`Unexpected message ${String(message.type)}`);
       })
     }
-  };
-  if (options.offscreenStorageAvailable !== false) {
-    chromeStub.storage = {
-      local: {
-        get: vi.fn(async (key: string) => ({
-          [key]: key === 'voivoxCaptureState' ? state : extraStorage[key]
-        })),
-        remove: vi.fn(async (key: string) => {
-          delete extraStorage[key];
-        }),
-        set: vi.fn(async (value: Record<string, unknown>) => {
-          if (value.voivoxCaptureState) {
-            state = value.voivoxCaptureState as CaptureState;
-          }
-          for (const [key, storedValue] of Object.entries(value)) {
-            if (key !== 'voivoxCaptureState') {
-              extraStorage[key] = storedValue;
-            }
-          }
-        })
-      }
-    };
-  }
-  vi.stubGlobal('chrome', chromeStub);
-  vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
-    const url = String(input);
-    requestedUrls.push(url);
-    return jsonResponse({ ok: true });
-  }));
+  });
 
   await import('../src/offscreen.js');
-  if (!listener) {
-    throw new Error('The offscreen document did not register a runtime listener.');
-  }
+  if (!listener) throw new Error('Offscreen listener was not registered.');
 
   return {
-    captureAudioDispatcher: () => {
-      const listener = activeNode?.port.onmessage;
-      if (!listener) {
-        throw new Error('The audio worklet is not connected.');
-      }
-      return (audio) => listener({ data: audio } as MessageEvent<Float32Array>);
-    },
-    dispatch: (message) => new Promise<OffscreenResponse>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Offscreen response timed out.')), 60_000);
-      const keepAlive = listener?.(message, {} as chrome.runtime.MessageSender, (response) => {
+    dispatch: (message) => new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Offscreen response timed out.')), 1_000);
+      const kept = listener?.(message, {} as chrome.runtime.MessageSender, (response) => {
         clearTimeout(timeout);
         resolve(response);
       });
-      if (!keepAlive) {
+      if (!kept) {
         clearTimeout(timeout);
-        reject(new Error('The offscreen message channel was not kept alive.'));
+        reject(new Error('Offscreen channel was not kept alive.'));
       }
     }),
     emitAudio: (audio) => {
-      if (!activeNode?.port.onmessage) {
-        throw new Error('The audio worklet is not connected.');
-      }
+      if (!activeNode?.port.onmessage) throw new Error('Audio handler is not active.');
       activeNode.port.onmessage({ data: audio } as MessageEvent<Float32Array>);
     },
+    getUserMedia,
     hasActiveAudioHandler: () => Boolean(activeNode?.port.onmessage),
-    releaseMedia,
-    requestedUrls,
-    stateMessages,
+    get lastGain() {
+      return lastContext?.gain;
+    },
     get savedState() {
       return state;
     },
     track,
     waitForState: async (predicate) => {
-      await vi.waitFor(() => {
-        expect(predicate(state)).toBe(true);
-      }, { interval: 5, timeout: 500 });
+      await vi.waitFor(() => expect(predicate(state)).toBe(true), { interval: 5, timeout: 500 });
+    },
+    get workerConstructed() {
+      return workerConstructed;
     }
   };
 }
@@ -450,32 +358,22 @@ class FakeAudioWorkletNode {
 class FakeAudioContext {
   readonly audioWorklet = { addModule: vi.fn(async () => undefined) };
   readonly destination = {};
-  readonly sampleRate = 16_000;
   readonly close = vi.fn(async () => undefined);
+  readonly gain = {
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    gain: { value: 1 }
+  } as unknown as GainNode;
   readonly resume = vi.fn(async () => undefined);
 
+  constructor(readonly sampleRate: number) {}
+
   createGain(): GainNode {
-    return {
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      gain: { value: 1 }
-    } as unknown as GainNode;
+    return this.gain;
   }
 
   createMediaStreamSource(): MediaStreamAudioSourceNode {
     return { connect: vi.fn() } as unknown as MediaStreamAudioSourceNode;
   }
-}
 
-function jsonResponse(value: unknown, status = 200): Response {
-  return new Response(JSON.stringify(value), {
-    headers: { 'content-type': 'application/json' },
-    status
-  });
-}
-
-async function flushMicrotasks(): Promise<void> {
-  for (let index = 0; index < 12; index += 1) {
-    await Promise.resolve();
-  }
 }
