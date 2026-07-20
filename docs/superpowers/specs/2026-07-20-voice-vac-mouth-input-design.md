@@ -14,6 +14,12 @@ Double-clicking the suction head performs one continuous game-prop sequence:
 
 The eyes live on the upper side shell of the three-dimensional head. They become visible only after the head has left the dock. Manual drag continues to use the flexible physical hose and does not use the straight URL-input pose.
 
+## Connector and eye-patch correction
+
+The visible hose must terminate inside the rear cylindrical socket of the suction head. The centerline endpoint is not allowed to stop in front of the collar: it advances 8 pt past the socket pivot in the incoming hose direction, creating a deliberate insertion overlap that remains closed during drag rotation and URL-mode rotation. The authored rubber collar is slightly wider and longer than the maximum hose rib so the hose reads as mechanically captured rather than merely touching the head.
+
+The two eyes are shallow side-mounted appliques. Each eye has a warm-white, rounded sticker base and a separate dark pupil, with depth less than 35% of the sticker's widest face dimension. They remain real 3D meshes parented to `VAC_NOZZLE_DUCKBILL`, but must read as pasted-on toy eyes rather than spheres, holes, or floating eyeballs.
+
 ## Architecture
 
 `NozzleURLAnimator` owns the deterministic staged pose values: depth retreat, dock-to-horizontal rotation, straight vertical lift, late mouth turn, mouth expansion, and embedded-input reveal. `VoiceVACInteractionRuntime` applies those frames to the RealityKit head and to a URL-specific straight hose presentation.
@@ -37,4 +43,6 @@ The embedded field remains disabled and non-focusable until the final mouth-turn
 - No production `URLInputPanel` is created or shown.
 - `Paste video link` is a descendant of `NozzleHitPanel` and visually clipped inside the mouth slot.
 - Manual drag still produces the flexible C/S hose.
-
+- The hose endpoint advances 8 pt into the rear socket and never leaves a visible gap at the connector.
+- The collar outer diameter remains larger than the maximum hose diameter.
+- Each eye and pupil is a shallow applique whose depth is less than 35% of its widest face dimension.
