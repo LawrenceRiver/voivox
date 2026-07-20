@@ -128,6 +128,44 @@ final class HoseRenderSession {
         try dock(in: dockFrame)
     }
 
+    /// Moves the machine-side outlet while preserving a mouth that is already
+    /// attached to a page. This is the external counterpart to `dock(in:)`:
+    /// the glass capsule may move, but the hose must never retain a ghost root
+    /// at the capsule's previous screen position.
+    func reanchorExternalHose(to nozzleFrame: CGRect) throws {
+        guard showsExternalHose else {
+            try dock(in: nozzleFrame)
+            return
+        }
+        let snapshot = rod.snapshot
+        guard let root = snapshot.joints.first,
+              let tip = snapshot.joints.last
+        else { throw HoseRenderSessionError.unavailableSimulationFailure }
+
+        let outlet = SIMD3<Double>(nozzleFrame.midX, nozzleFrame.midY, 0)
+        let span = simd_distance(outlet, tip.position)
+        let activeLength = min(
+            max(stowedActiveLength, span * 1.18),
+            rod.configuration.maximumActiveLength
+        )
+        let result = rod.configurePins(
+            rootPosition: outlet,
+            rootOrientation: root.orientation,
+            tipPosition: tip.position,
+            tipOrientation: tip.orientation,
+            activeLength: activeLength
+        )
+        guard case let .failure(failure) = result else {
+            dockFrame = nozzleFrame
+            rootGlobalPoint = CGPoint(x: outlet.x, y: outlet.y)
+            try publishCurrentSnapshot()
+            return
+        }
+        let error = HoseRenderSessionError.simulation(failure)
+        source.publishError(error)
+        throw error
+    }
+
     func step(deltaTime: Double, iterations: Int? = nil) throws {
         guard !rod.step(deltaTime: deltaTime, iterations: iterations) else {
             try publishCurrentSnapshot()

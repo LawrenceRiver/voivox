@@ -221,6 +221,17 @@ final class OverlayCoordinator: WindowCoordinating, VoiceVACInteractionPresentin
             } catch {
                 // HoseRenderSession has already surfaced this contract failure in every viewport.
             }
+        } else {
+            // The mouth remains attached to its page target; only its machine
+            // end migrates with the capsule. Re-anchor the live XPBD rig so
+            // the rendered tube continues to leave the new glass port.
+            interactionRuntime?.configureDock(frame: layout.nozzleHitFrame)
+            do {
+                try hoseRenderSession?.reanchorExternalHose(to: layout.nozzleHitFrame)
+            } catch {
+                // Preserve the visible remote mouth if a screen move would
+                // exceed the available physical hose length.
+            }
         }
         panels[.transcript]?.setFrame(layout.transcriptFrame)
         panels[.urlInput]?.setFrame(layout.transcriptFrame)

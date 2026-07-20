@@ -77,6 +77,27 @@ final class HoseRigControllerTests: XCTestCase {
         XCTAssertEqual(renderedRoot.y, Float(portFrame.midY / 1_000), accuracy: 0.000_01)
     }
 
+    @MainActor
+    func testMovedCapsuleReanchorsAnExternalHoseAtItsNewPortWithoutMovingTheMouth() throws {
+        let source = HoseRenderSnapshotSource()
+        let session = HoseRenderSession(source: source, seed: 93)
+        let originalPort = CGRect(x: 300, y: 120, width: 96, height: 96)
+        let remoteMouth = CGPoint(x: 900, y: 560)
+
+        try session.dock(in: originalPort)
+        try session.deployVisual(toward: remoteMouth)
+        try session.reanchorExternalHose(to: CGRect(x: 520, y: 260, width: 96, height: 96))
+
+        let path = try XCTUnwrap(source.latest?.centerline)
+        let first = try XCTUnwrap(path.first)
+        let last = try XCTUnwrap(path.last)
+        let newPort = CGPoint(x: 568, y: 308)
+        XCTAssertEqual(first.x, Float(newPort.x / 1_000), accuracy: 0.000_01)
+        XCTAssertEqual(first.y, Float(newPort.y / 1_000), accuracy: 0.000_01)
+        XCTAssertEqual(last.x, Float(remoteMouth.x / 1_000), accuracy: 0.000_01)
+        XCTAssertEqual(last.y, Float(remoteMouth.y / 1_000), accuracy: 0.000_01)
+    }
+
     func testDynamicBellowsUsesActualPathLengthInsteadOfCollapsingSkinBones() {
         let geometry = HoseBellowsGeometry.make(
             centerline: [
