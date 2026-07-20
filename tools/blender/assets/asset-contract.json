@@ -35,8 +35,8 @@
   ],
   "exports": {
     "VoiceVACDevice.usdz": {
-      "byteCount": 418717,
-      "sha256": "558f288889d37ecd9ecf417ed6423701ab99dc8aaff16f2b817b50bb0e4cc7bb"
+      "byteCount": 418828,
+      "sha256": "39b01a06389a8729f28f0870f88f534061ddce503048736b3494807b5066e2b1"
     },
     "VoiceVACHose.meshbin": {
       "byteCount": 814808,
@@ -44,7 +44,7 @@
     },
     "VoiceVACHose.usdz": {
       "byteCount": 830433,
-      "sha256": "a1afd7aa464c1142de68543182b420bb92c05feb5e52108f8bfebd49aaaccd47"
+      "sha256": "3a7e379761acb543bfe7a75a4cf22b734c997bb61c04556071abcc6a2c629267"
     }
   },
   "hoseRuntime": {
@@ -215,13 +215,13 @@
     "VAC_DEVICE_ROOT": {
       "max": [
         0.189331,
-        0.0678,
-        0.089
+        0.05,
+        0.1056
       ],
       "min": [
         -0.192171,
-        -0.059,
-        -0.085
+        -0.124,
+        -0.059331
       ]
     },
     "VAC_HOSE_ROOT": {
@@ -252,12 +252,24 @@
       "max": [
         0.087,
         0.01,
-        0.03584
+        0.036
       ],
       "min": [
         -0.087,
-        -0.1048,
+        -0.1036,
         -0.03584
+      ]
+    },
+    "VAC_NOZZLE_DUCKBILL": {
+      "max": [
+        0.087,
+        0.002,
+        0.036
+      ],
+      "min": [
+        -0.087,
+        -0.1036,
+        -0.02843
       ]
     },
     "VAC_NOZZLE_TIP": {
@@ -427,10 +439,10 @@
   },
   "nominalDockTransform": {
     "rotationQuaternion": [
-      -0.0,
-      -0.707107,
-      -0.0,
-      0.707107
+      0.5,
+      -0.5,
+      -0.5,
+      0.5
     ],
     "scale": [
       1.0,
@@ -445,10 +457,10 @@
   },
   "nozzlePivot": {
     "rotationQuaternion": [
-      -0.0,
-      -0.707107,
-      -0.0,
-      0.707107
+      0.5,
+      -0.5,
+      -0.5,
+      0.5
     ],
     "scale": [
       1.0,
@@ -476,13 +488,14 @@
   "product": "Voice VAC",
   "reproducibility": {
     "mode": "semantic-contract-v1",
-    "sceneSemanticSHA256": "764bf00195ed931708ff4e3ee2ed992f9dd9faf43b011fa3d19890b932ef4f86",
+    "sceneSemanticSHA256": "fbb6e914c0d52b5facb0bf12f4581824a198804cb531cfc8cf5bd7360c2e9b25",
     "statement": "Normalized scene semantics are reproducible; Blender and USD container bytes are not promised identical."
   },
   "runtimeNodes": [
     "VAC_DEVICE_ROOT",
     "VAC_PORT",
     "VAC_NOZZLE",
+    "VAC_NOZZLE_DUCKBILL",
     "VAC_NOZZLE_TIP",
     "VAC_BUTTON_BASE",
     "VAC_BUTTON_CAP",
@@ -636,10 +649,10 @@
         "node": "VAC_NOZZLE",
         "transform": {
           "rotationQuaternion": [
-            -0.0,
-            -0.707107,
-            -0.0,
-            0.707107
+            0.5,
+            -0.5,
+            -0.5,
+            0.5
           ],
           "scale": [
             1.0,
@@ -660,9 +673,9 @@
         "transform": {
           "rotationQuaternion": [
             -0.0,
-            -0.707107,
             -0.0,
-            0.707107
+            0.0,
+            1.0
           ],
           "scale": [
             1.0,
@@ -671,8 +684,8 @@
           ],
           "translation": [
             -0.132,
-            -0.027,
-            0.02
+            -0.037,
+            0.002
           ]
         }
       }
@@ -755,8 +768,8 @@
     "weightedVertexCount": 8766
   },
   "sourceHashes": {
-    "build_voice_vac.py": "8e0e4e4ea793e9038fe0043a727064942811f6797e782ccfd8329047d6c90973",
-    "voice-vac-machine.blend": "e920f139ae9976eae91f9810f48e8ce1fe5b214349588d0991e23323a247f4b3"
+    "build_voice_vac.py": "b7e2999048ffe0a27f03cfa5fa6e81966fa2d91a1a83e980900c20ef8d833041",
+    "voice-vac-machine.blend": "86b463159247d443fb32e4df6d9163e55b1afbf2f226618add55cbb8870116d0"
   },
   "units": {
     "linear": "meter",

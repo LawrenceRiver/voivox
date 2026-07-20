@@ -12,6 +12,12 @@ enum HoseRenderSessionError: Error, Equatable {
 /// Production composition boundary from the XPBD rod to every Metal viewport.
 @MainActor
 final class HoseRenderSession {
+    private enum PresentationMode {
+        case stowed
+        case softDrag
+        case straightURL
+    }
+
     let source: HoseRenderSnapshotSource
     private(set) var rod: HoseRod
     private let controller: HoseRigController
@@ -19,6 +25,8 @@ final class HoseRenderSession {
     private(set) var dockFrame: CGRect?
     private(set) var rootGlobalPoint: CGPoint?
     private var showsExternalHose = false
+    private var presentationMode = PresentationMode.stowed
+    private var straightURLTipGlobalPoint: CGPoint?
 
     /// Eight material bays make a short, readable idle lead without asking a
     /// flexible tube to self-intersect inside the capsule. The full bellows
@@ -49,6 +57,8 @@ final class HoseRenderSession {
     func dock(in nozzleFrame: CGRect) throws {
         dockFrame = nozzleFrame
         showsExternalHose = false
+        presentationMode = .stowed
+        straightURLTipGlobalPoint = nil
         let length = stowedActiveLength
         let outlet = SIMD3<Double>(nozzleFrame.midX, nozzleFrame.midY, 0)
         rootGlobalPoint = CGPoint(x: outlet.x, y: outlet.y)
@@ -110,12 +120,34 @@ final class HoseRenderSession {
             rod.configuration.maximumActiveLength
         )
         showsExternalHose = true
+        presentationMode = .softDrag
+        straightURLTipGlobalPoint = nil
         try updateDeployment(
             tipGlobalPoint: tipGlobalPoint,
             activeLength: activeLength,
             orientation: orientation
         )
         try step(deltaTime: 1.0 / 60.0)
+    }
+
+    /// URL entry is a deliberate toy-mechanism pose: the accordion rises as
+    /// one straight column before the duckbill turns. It shares the physical
+    /// endpoint constraints with drag mode, but does not add drag-mode slack.
+    func deployStraightForURL(
+        toward tipGlobalPoint: CGPoint,
+        orientation: simd_quatd = simd_quatd(
+            angle: .pi / 2,
+            axis: SIMD3(0, 0, 1)
+        )
+    ) throws {
+        guard let rootGlobalPoint else {
+            throw HoseRenderSessionError.visualDeploymentRequiresDock
+        }
+        _ = orientation
+        showsExternalHose = true
+        presentationMode = .straightURL
+        straightURLTipGlobalPoint = tipGlobalPoint
+        try publishCurrentSnapshot()
     }
 
     /// Return the XPBD rig to the same stable multi-bay pose used at launch.
@@ -221,6 +253,27 @@ final class HoseRenderSession {
               let end = physicalPath.last
         else {
             return physicalPath.map { SIMD3<Float>(Float($0.x), Float($0.y), Float($0.z)) }
+        }
+
+        if presentationMode == .straightURL,
+           let straightURLTipGlobalPoint {
+            let start = SIMD3<Double>(
+                rootGlobalPoint.map { Double($0.x) / 1_000 } ?? start.x,
+                rootGlobalPoint.map { Double($0.y) / 1_000 } ?? start.y,
+                0
+            )
+            let end = SIMD3<Double>(
+                Double(straightURLTipGlobalPoint.x) / 1_000,
+                Double(straightURLTipGlobalPoint.y) / 1_000,
+                0
+            )
+            let distance = simd_length(end - start)
+            let sampleCount = max(18, min(48, Int(distance * 1_000 / 24)))
+            return (0...sampleCount).map { index in
+                let t = Double(index) / Double(sampleCount)
+                let point = simd_mix(start, end, SIMD3<Double>(repeating: t))
+                return SIMD3<Float>(Float(point.x), Float(point.y), Float(point.z))
+            }
         }
 
         let chord = end - start

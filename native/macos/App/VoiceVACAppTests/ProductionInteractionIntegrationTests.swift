@@ -94,8 +94,6 @@ final class ProductionInteractionIntegrationTests: XCTestCase {
         XCTAssertTrue(coordinator.panel(for: .capsule) is CapsulePanel)
         XCTAssertTrue(coordinator.panel(for: .nozzle) is NozzleHitPanel)
         XCTAssertTrue(coordinator.panel(for: .transcript) is TranscriptPanel)
-        XCTAssertTrue(coordinator.panel(for: .urlInput) is URLInputPanel)
-
         let capsule = try XCTUnwrap(coordinator.panel(for: .capsule) as? CapsulePanel)
         XCTAssertTrue(capsule.glass.physicalButton.store === environment.store)
         XCTAssertTrue(capsule.glass.physicalButton.deviceController === runtime.deviceController)
@@ -202,14 +200,18 @@ final class ProductionInteractionIntegrationTests: XCTestCase {
             transcriptPreview: "Only this transcript is copied."
         ))
         let transcript = TranscriptPanel(frame: CGRect(x: 0, y: 0, width: 318, height: 74), store: store)
-        let url = URLInputPanel(frame: CGRect(x: 0, y: 0, width: 318, height: 74), onSubmit: { _ in })
+        let nozzle = NozzleHitPanel(
+            frame: CGRect(x: 0, y: 0, width: 96, height: 96),
+            onURLSubmit: { _ in }
+        )
+        nozzle.setEmbeddedURLInputPresented(true)
 
         XCTAssertEqual(transcript.glass.titleLabel.stringValue, "Voice VAC")
         XCTAssertEqual(transcript.glass.previewLabel.stringValue, "Only this transcript is copied.")
         XCTAssertEqual(transcript.glass.copyButton.accessibilityIdentifier(), "voice-vac-copy-transcript")
-        XCTAssertTrue(url.inputView.isDescendant(of: try! XCTUnwrap(url.contentView)))
-        XCTAssertEqual(url.inputView.urlField.accessibilityIdentifier(), "voice-vac-url-field")
-        XCTAssertEqual(url.inputView.startButton.accessibilityIdentifier(), "voice-vac-url-start")
+        XCTAssertTrue(nozzle.embeddedURLInputView.isDescendant(of: try! XCTUnwrap(nozzle.contentView)))
+        XCTAssertEqual(nozzle.embeddedURLInputView.urlField.accessibilityIdentifier(), "voice-vac-url-field")
+        XCTAssertEqual(nozzle.embeddedURLInputView.startButton.accessibilityIdentifier(), "voice-vac-url-start")
 
         NSPasteboard.general.clearContents()
         transcript.glass.copyButton.performClick(nil)
@@ -242,7 +244,7 @@ final class ProductionInteractionIntegrationTests: XCTestCase {
         XCTAssertEqual(presenter.urlPresentationEvents, [false, true])
         let finalMove = try XCTUnwrap(presenter.nozzleMoves.last)
         XCTAssertEqual(finalMove.center.x, 200, accuracy: 0.001)
-        XCTAssertEqual(finalMove.center.y, 242, accuracy: 0.001)
+        XCTAssertEqual(finalMove.center.y, 296, accuracy: 0.001)
         XCTAssertFalse(clock.isRunning)
     }
 

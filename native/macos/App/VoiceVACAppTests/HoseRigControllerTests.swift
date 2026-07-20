@@ -164,6 +164,7 @@ final class HoseRigControllerTests: XCTestCase {
         let session = HoseRenderSession(source: source, seed: 82)
         try session.dock(in: CGRect(x: 0, y: 0, width: 96, height: 96))
 
+        try session.restoreDockedPose()
         try session.deployVisual(toward: CGPoint(x: -500, y: 180))
 
         let root = try XCTUnwrap(session.rootGlobalPoint)
@@ -183,6 +184,36 @@ final class HoseRigControllerTests: XCTestCase {
         // Slack must produce a readable C/S sweep, not merely a 1.18× rest
         // length hidden inside a visually taut line.
         XCTAssertGreaterThan(greatestSag, 0.10, "rendered sag was \(greatestSag)m")
+    }
+
+    @MainActor
+    func testURLDeploymentPublishesAStraightAccordionWithoutChangingSoftDrag() throws {
+        let source = HoseRenderSnapshotSource()
+        let session = HoseRenderSession(source: source, seed: 82)
+        let port = CGRect(x: 100, y: 100, width: 96, height: 96)
+        try session.dock(in: port)
+
+        try session.deployStraightForURL(toward: CGPoint(x: port.midX, y: 340))
+
+        let straight = try XCTUnwrap(source.latest?.centerline)
+        XCTAssertGreaterThan(straight.count, 12)
+        XCTAssertTrue(try XCTUnwrap(source.latest).showsExternalHose)
+        for point in straight {
+            XCTAssertEqual(point.x, Float(port.midX / 1_000), accuracy: 0.000_1)
+            XCTAssertEqual(point.z, 0, accuracy: 0.000_1)
+        }
+
+        try session.deployVisual(toward: CGPoint(x: -500, y: 180))
+        let soft = try XCTUnwrap(source.latest?.centerline)
+        let softStart = try XCTUnwrap(soft.first)
+        let softEnd = try XCTUnwrap(soft.last)
+        let chord = softEnd - softStart
+        let chordLength = simd_length(chord)
+        let greatestSag = soft.map { point -> Float in
+            abs(chord.x * (point.y - softStart.y) - chord.y * (point.x - softStart.x))
+                / max(chordLength, 0.000_01)
+        }.max() ?? 0
+        XCTAssertGreaterThan(greatestSag, 0.10)
     }
 
     @MainActor

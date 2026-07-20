@@ -270,10 +270,18 @@ final class VoiceVACInteractionRuntime {
         )
         presenter?.moveNozzlePanel(
             center: point,
-            hoseTangent: CGVector(dx: 1, dy: 0),
+            hoseTangent: CGVector(dx: 0, dy: 1),
             showsCloseButton: true
         )
-        if frame.showsURLInput {
+        if frame.verticalLift > 0.5 {
+            try? hoseSession?.deployStraightForURL(
+                toward: NozzlePresentationKinematics.rearCylinderPoint(
+                    forNozzleCenter: point,
+                    hoseTangent: CGVector(dx: 0, dy: 1)
+                )
+            )
+        }
+        if frame.showsEmbeddedInput {
             presenter?.setURLInputPresented(true)
         }
         if urlElapsed >= urlAnimator.duration {

@@ -10,6 +10,7 @@ final class RealityAssetContractTests: XCTestCase {
         "VAC_DEVICE_ROOT",
         "VAC_PORT",
         "VAC_NOZZLE",
+        "VAC_NOZZLE_DUCKBILL",
         "VAC_NOZZLE_TIP",
         "VAC_BUTTON_BASE",
         "VAC_BUTTON_CAP",
@@ -86,29 +87,45 @@ final class RealityAssetContractTests: XCTestCase {
         XCTAssertEqual(contract.materialAssignments["VAC_NOZZLE_TIP"], ["MAT_TOY_IVORY"])
     }
 
-    func testBundledDockPosePointsTheDuckbillUpward() throws {
+    func testBundledDockPoseFacesTheUserWithVerticalWidthAndOperatingPoseIsHorizontal() throws {
         let contract = try loadContract()
         let dock = try XCTUnwrap(contract.runtimePoseDelivery.namedPoses["nozzleDocked"])
+        let operating = try XCTUnwrap(contract.runtimePoseDelivery.namedPoses["nozzleLiftRotate"])
 
-        XCTAssertEqual(abs(dock.transform.rotationQuaternion[1]), sqrt(0.5), accuracy: 0.000_1)
-        XCTAssertEqual(abs(dock.transform.rotationQuaternion[2]), 0, accuracy: 0.000_1)
-        XCTAssertEqual(abs(dock.transform.rotationQuaternion[3]), sqrt(0.5), accuracy: 0.000_1)
-        XCTAssertEqual(abs(dock.transform.rotationQuaternion[0]), 0, accuracy: 0.000_1)
+        let dockRotation = quaternion(from: dock.transform)
+        let dockMouthNormal = dockRotation.act(SIMD3<Float>(0, -1, 0))
+        let dockWidth = dockRotation.act(SIMD3<Float>(1, 0, 0))
+        XCTAssertGreaterThan(dockMouthNormal.z, 0.99)
+        XCTAssertGreaterThan(dockWidth.y, 0.99)
+
+        let operatingRotation = quaternion(from: operating.transform)
+        let operatingMouthNormal = operatingRotation.act(SIMD3<Float>(0, -1, 0))
+        let operatingWidth = operatingRotation.act(SIMD3<Float>(1, 0, 0))
+        XCTAssertGreaterThan(operatingMouthNormal.y, 0.99)
+        XCTAssertGreaterThan(abs(operatingWidth.x), 0.99)
     }
 
-    func testBundledNozzleHasTwoToyEyes() throws {
+    func testBundledNozzleHasAControllableDuckbillWithTwoSideEyes() async throws {
         let nozzleURL = try XCTUnwrap(Bundle.main.url(forResource: "VoiceVACDevice", withExtension: "usdz"))
         let usdText = try usdCat(nozzleURL)
 
+        XCTAssertTrue(usdText.contains("VAC_NOZZLE_DUCKBILL"))
         XCTAssertTrue(usdText.contains("VAC_NOZZLE_EYE_L"))
         XCTAssertTrue(usdText.contains("VAC_NOZZLE_EYE_R"))
+
+        let device = try await Entity(contentsOf: nozzleURL)
+        let duckbill = try XCTUnwrap(device.findEntity(named: "VAC_NOZZLE_DUCKBILL"))
+        let leftEye = try XCTUnwrap(device.findEntity(named: "VAC_NOZZLE_EYE_L"))
+        let rightEye = try XCTUnwrap(device.findEntity(named: "VAC_NOZZLE_EYE_R"))
+        XCTAssertTrue(leftEye.parent === duckbill)
+        XCTAssertTrue(rightEye.parent === duckbill)
     }
 
     func testBundledUSDZIntegrityHierarchyAndStaticRestPose() async throws {
         let contract = try loadContract()
         let expectations: [String: Set<String>] = [
             "VoiceVACDevice": [
-                "VAC_DEVICE_ROOT", "VAC_PORT", "VAC_NOZZLE", "VAC_NOZZLE_TIP",
+                "VAC_DEVICE_ROOT", "VAC_PORT", "VAC_NOZZLE", "VAC_NOZZLE_DUCKBILL", "VAC_NOZZLE_TIP",
                 "VAC_BUTTON_BASE", "VAC_BUTTON_CAP",
             ],
             "VoiceVACHose": ["VAC_HOSE_ROOT", "VAC_HOSE_SKIN"],
@@ -294,6 +311,15 @@ final class RealityAssetContractTests: XCTestCase {
 
     private func sha256(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func quaternion(from transform: AssetTransform) -> simd_quatf {
+        simd_quatf(
+            ix: Float(transform.rotationQuaternion[1]),
+            iy: Float(transform.rotationQuaternion[2]),
+            iz: Float(transform.rotationQuaternion[3]),
+            r: Float(transform.rotationQuaternion[0])
+        )
     }
 
     private func assertRealityTransform(

@@ -3,10 +3,10 @@ import CoreGraphics
 import Foundation
 
 enum NozzleURLAnimationStage: Int, CaseIterable, Equatable {
-    case unlockAndLift
-    case rotateInPlane
-    case cExtension
-    case reverseSCurlAndInput
+    case retreatAndRotateHorizontal
+    case straightLift
+    case turnMouthTowardUser
+    case expandMouthAndInput
 }
 
 struct NozzleURLKeyframe: Equatable {
@@ -19,23 +19,26 @@ struct NozzleURLAnimationFrame: Equatable {
     let stage: NozzleURLAnimationStage
     let stageProgress: CGFloat
     let translation: CGPoint
-    let lift: CGFloat
     /// Positive values travel away from the camera, deeper into the desktop.
-    let intoScreenDepth: CGFloat
-    /// Rotates the duckbill around screen X until the mouth faces the user.
-    let mouthRevealRotation: CGFloat
-    let cCurl: CGFloat
-    let reverseSCurl: CGFloat
+    let depthRetreat: CGFloat
+    /// Interpolates the front-facing vertical dock into the horizontal operating pose.
+    let operatingPoseProgress: CGFloat
+    /// Straight screen-space rise from the capsule port, in points.
+    let verticalLift: CGFloat
+    /// Late screen-X turn that presents the dark mouth to the user.
+    let mouthTurnProgress: CGFloat
+    /// X scale applied only to the authored duckbill subtree.
+    let mouthExpansion: CGFloat
     let inputOpacity: CGFloat
-    let showsURLInput: Bool
+    let showsEmbeddedInput: Bool
 }
 
 struct NozzleURLAnimator {
     let timeline: [NozzleURLKeyframe] = [
-        .init(stage: .unlockAndLift, startTime: 0.00, duration: 0.12),
-        .init(stage: .rotateInPlane, startTime: 0.12, duration: 0.14),
-        .init(stage: .cExtension, startTime: 0.26, duration: 0.22),
-        .init(stage: .reverseSCurlAndInput, startTime: 0.48, duration: 0.24),
+        .init(stage: .retreatAndRotateHorizontal, startTime: 0.00, duration: 0.18),
+        .init(stage: .straightLift, startTime: 0.18, duration: 0.24),
+        .init(stage: .turnMouthTowardUser, startTime: 0.42, duration: 0.16),
+        .init(stage: .expandMouthAndInput, startTime: 0.58, duration: 0.20),
     ]
 
     var duration: TimeInterval {
@@ -53,64 +56,58 @@ struct NozzleURLAnimator {
         let eased = smoothStep(progress)
 
         switch keyframe.stage {
-        case .unlockAndLift:
+        case .retreatAndRotateHorizontal:
             return NozzleURLAnimationFrame(
                 stage: keyframe.stage,
                 stageProgress: progress,
-                translation: CGPoint(x: 0, y: 18 * eased),
-                lift: 18 * eased,
-                intoScreenDepth: 0.006 * eased,
-                mouthRevealRotation: 0,
-                cCurl: 0,
-                reverseSCurl: 0,
+                translation: .zero,
+                depthRetreat: 0.052 * eased,
+                operatingPoseProgress: eased,
+                verticalLift: 0,
+                mouthTurnProgress: 0,
+                mouthExpansion: 1,
                 inputOpacity: 0,
-                showsURLInput: false
+                showsEmbeddedInput: false
             )
-        case .rotateInPlane:
+        case .straightLift:
             return NozzleURLAnimationFrame(
                 stage: keyframe.stage,
                 stageProgress: progress,
-                translation: CGPoint(x: 0, y: 18 + 4 * eased),
-                lift: 18,
-                intoScreenDepth: 0.006 + 0.038 * eased,
-                mouthRevealRotation: (.pi / 5) * eased,
-                cCurl: 0,
-                reverseSCurl: 0,
+                translation: CGPoint(x: 0, y: 96 * eased),
+                depthRetreat: 0.052,
+                operatingPoseProgress: 1,
+                verticalLift: 96 * eased,
+                mouthTurnProgress: 0,
+                mouthExpansion: 1,
                 inputOpacity: 0,
-                showsURLInput: false
+                showsEmbeddedInput: false
             )
-        case .cExtension:
+        case .turnMouthTowardUser:
             return NozzleURLAnimationFrame(
                 stage: keyframe.stage,
                 stageProgress: progress,
-                translation: CGPoint(
-                    x: 5 * sin(.pi * eased),
-                    y: 22 + 12 * eased
-                ),
-                lift: 18,
-                intoScreenDepth: 0.044 + 0.022 * sin(.pi * eased),
-                mouthRevealRotation: (.pi / 5) + (3 * .pi / 10) * eased,
-                cCurl: eased,
-                reverseSCurl: 0,
+                translation: CGPoint(x: 0, y: 96),
+                depthRetreat: 0.052,
+                operatingPoseProgress: 1,
+                verticalLift: 96,
+                mouthTurnProgress: eased,
+                mouthExpansion: 1,
                 inputOpacity: 0,
-                showsURLInput: false
+                showsEmbeddedInput: false
             )
-        case .reverseSCurlAndInput:
-            let inputProgress = min(max((eased - 0.62) / 0.38, 0), 1)
+        case .expandMouthAndInput:
+            let inputProgress = min(max((eased - 0.42) / 0.58, 0), 1)
             return NozzleURLAnimationFrame(
                 stage: keyframe.stage,
                 stageProgress: progress,
-                translation: CGPoint(
-                    x: -5 * sin(eased * .pi * 2),
-                    y: 34 + 8 * eased
-                ),
-                lift: 18,
-                intoScreenDepth: 0.044 - 0.026 * eased + 0.008 * sin(eased * .pi * 2),
-                mouthRevealRotation: .pi / 2,
-                cCurl: 1,
-                reverseSCurl: eased,
+                translation: CGPoint(x: 0, y: 96),
+                depthRetreat: 0.052,
+                operatingPoseProgress: 1,
+                verticalLift: 96,
+                mouthTurnProgress: 1,
+                mouthExpansion: 1 + 1.35 * eased,
                 inputOpacity: inputProgress,
-                showsURLInput: inputProgress > 0
+                showsEmbeddedInput: inputProgress > 0
             )
         }
     }
@@ -133,26 +130,44 @@ final class NozzleURLInputView: NSView, NSTextFieldDelegate {
 
     init(onSubmit: @escaping (URL) -> Void) {
         self.onSubmit = onSubmit
-        super.init(frame: CGRect(x: 0, y: 0, width: 320, height: 56))
+        super.init(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
         isHidden = true
+        setAccessibilityIdentifier("voice-vac-embedded-mouth-input")
 
-        urlField.placeholderString = "Paste video link"
+        let fieldFont = NSFont.systemFont(ofSize: 13, weight: .medium)
+        urlField.placeholderAttributedString = NSAttributedString(
+            string: "Paste video link",
+            attributes: [
+                .font: fieldFont,
+                .foregroundColor: NSColor.white.withAlphaComponent(0.62),
+            ]
+        )
         urlField.setAccessibilityIdentifier("voice-vac-url-field")
         urlField.setAccessibilityLabel("Video URL")
         urlField.delegate = self
         urlField.isBezeled = false
         urlField.drawsBackground = false
         urlField.focusRingType = .none
-        urlField.frame = CGRect(x: 16, y: 12, width: 234, height: 32)
+        urlField.textColor = .white
+        urlField.font = fieldFont
+        urlField.frame = CGRect(x: 16, y: 6, width: 220, height: 32)
         urlField.autoresizingMask = [.width]
         addSubview(urlField)
 
         startButton.bezelStyle = .texturedRounded
+        startButton.attributedTitle = NSAttributedString(
+            string: "Start",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+                .foregroundColor: NSColor.white,
+            ]
+        )
         startButton.setAccessibilityIdentifier("voice-vac-url-start")
         startButton.setAccessibilityLabel("Start URL transcription")
         startButton.target = self
         startButton.action = #selector(submitFromStartButton)
-        startButton.frame = CGRect(x: 254, y: 12, width: 58, height: 32)
+        startButton.contentTintColor = .white
+        startButton.frame = CGRect(x: 240, y: 6, width: 52, height: 32)
         startButton.autoresizingMask = [.minXMargin]
         addSubview(startButton)
     }

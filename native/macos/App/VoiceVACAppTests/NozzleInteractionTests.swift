@@ -88,10 +88,10 @@ final class NozzleInteractionTests: XCTestCase {
     func testDoubleClickTimelineIsDeterministicAndUsesFourOrderedStages() {
         let animator = NozzleURLAnimator()
         XCTAssertEqual(animator.timeline.map(\.stage), [
-            .unlockAndLift,
-            .rotateInPlane,
-            .cExtension,
-            .reverseSCurlAndInput,
+            .retreatAndRotateHorizontal,
+            .straightLift,
+            .turnMouthTowardUser,
+            .expandMouthAndInput,
         ])
 
         let firstPass = stride(from: 0.0, through: animator.duration, by: 0.025).map(animator.frame(at:))
@@ -99,37 +99,55 @@ final class NozzleInteractionTests: XCTestCase {
         XCTAssertEqual(firstPass, secondPass)
         XCTAssertLessThanOrEqual(
             firstPass.map { abs($0.translation.x) }.max() ?? .infinity,
-            6,
-            "The URL gesture must curl into screen depth, not travel to the right"
+            0.001,
+            "The URL sequence must stay vertically aligned with the capsule port"
         )
-        XCTAssertGreaterThan(
-            firstPass.map(\.intoScreenDepth).max() ?? 0,
-            0.04,
-            "The double-click gesture needs a visible Z-depth S curl"
-        )
-        XCTAssertEqual(animator.frame(at: 0).stage, .unlockAndLift)
-        XCTAssertEqual(animator.frame(at: animator.duration).stage, .reverseSCurlAndInput)
-        XCTAssertEqual(animator.frame(at: animator.duration).mouthRevealRotation, .pi / 2, accuracy: 0.0001)
-        XCTAssertTrue(animator.frame(at: animator.duration).showsURLInput)
+        let firstStage = animator.timeline[0]
+        let firstEnd = animator.frame(at: firstStage.startTime + firstStage.duration - 0.000_1)
+        XCTAssertGreaterThan(firstEnd.depthRetreat, 0.035)
+        XCTAssertEqual(firstEnd.translation.y, 0, accuracy: 0.01)
+        XCTAssertEqual(firstEnd.operatingPoseProgress, 1, accuracy: 0.01)
+        XCTAssertEqual(firstEnd.verticalLift, 0, accuracy: 0.01)
+        XCTAssertEqual(firstEnd.mouthTurnProgress, 0, accuracy: 0.01)
+
+        let final = animator.frame(at: animator.duration)
+        XCTAssertEqual(animator.frame(at: 0).stage, .retreatAndRotateHorizontal)
+        XCTAssertEqual(final.stage, .expandMouthAndInput)
+        XCTAssertEqual(final.mouthTurnProgress, 1, accuracy: 0.0001)
+        XCTAssertGreaterThanOrEqual(final.mouthExpansion, 2)
+        XCTAssertTrue(final.showsEmbeddedInput)
     }
 
-    func testDoubleClickFinishMovesIntoDepthAndExposesTheMouthToTheCamera() async throws {
+    func testDockHidesSideEyesThenURLLiftRevealsThemAndExpandsOnlyTheDuckbill() async throws {
         let animator = NozzleURLAnimator()
         let finalFrame = animator.frame(at: animator.duration)
         let device = VoiceVACDeviceInteractionController()
         let nozzle = try await device.loadNozzleClone()
         let presentationRoot = Entity()
+        presentationRoot.addChild(nozzle)
         device.bindNozzlePresentationRoot(presentationRoot)
+
+        XCTAssertEqual(device.nozzleEyeEntities.count, 4)
+        XCTAssertTrue(device.nozzleEyeEntities.allSatisfy { !$0.isEnabled })
+        let dockedMouthNormal = nozzle.transform.rotation.act(SIMD3<Float>(0, -1, 0))
+        XCTAssertGreaterThan(dockedMouthNormal.z, 0.9)
+
+        let firstStage = animator.timeline[0]
+        try device.applyURLAnimationFrame(
+            animator.frame(at: firstStage.startTime + firstStage.duration - 0.000_1)
+        )
+        XCTAssertTrue(device.nozzleEyeEntities.allSatisfy(\.isEnabled))
 
         try device.applyURLAnimationFrame(finalFrame)
 
         XCTAssertEqual(
             presentationRoot.position.z,
-            -nozzle.position.z - Float(finalFrame.intoScreenDepth),
+            -nozzle.position.z - Float(finalFrame.depthRetreat),
             accuracy: 0.000_01
         )
         let cameraFacingMouthNormal = nozzle.transform.rotation.act(SIMD3<Float>(0, -1, 0))
         XCTAssertGreaterThan(cameraFacingMouthNormal.z, 0.9)
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(device.duckbillEntity).scale.x, 2)
     }
 
     func testURLInputOnlyBecomesKeyWhilePresentedAndAcceptsReturnAndStart() throws {

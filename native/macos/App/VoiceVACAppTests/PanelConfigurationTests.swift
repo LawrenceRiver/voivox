@@ -42,7 +42,6 @@ final class PanelConfigurationTests: XCTestCase {
         let capsule = CapsulePanel(frame: capsuleFrame)
         let nozzle = NozzleHitPanel(frame: nozzleFrame)
         let transcript = TranscriptPanel(frame: transcriptFrame)
-        let urlInput = URLInputPanel(frame: transcriptFrame)
         let hose = HoseOverlayPanel(
             screenID: ScreenID(rawValue: 41),
             frame: CGRect(x: -1440, y: -120, width: 1440, height: 900)
@@ -56,8 +55,6 @@ final class PanelConfigurationTests: XCTestCase {
         XCTAssertEqual(capsule.level.rawValue, 4)
         XCTAssertEqual(nozzle.level.rawValue, 6)
         XCTAssertEqual(transcript.level.rawValue, 7)
-        XCTAssertEqual(urlInput.level.rawValue, 7)
-        XCTAssertLessThan(urlInput.level.rawValue, NSWindow.Level.modalPanel.rawValue)
         XCTAssertNotEqual(hose.level, NSWindow.Level.screenSaver)
         XCTAssertNotEqual(hose.level, NSWindow.Level.popUpMenu)
     }
@@ -90,25 +87,41 @@ final class PanelConfigurationTests: XCTestCase {
         // desktop scale and usable as a drag target.
         XCTAssertEqual(nozzle.nozzleRealityView.frame.size, NozzleHitPanel.deployedSize)
         XCTAssertEqual(nozzle.interactionView.frame.size, NozzleHitPanel.deployedSize)
+        XCTAssertTrue(nozzle.contentView?.layer?.masksToBounds ?? false)
+        XCTAssertTrue(nozzle.nozzleRealityView.layer?.masksToBounds ?? false)
     }
 
-    func testURLAndTranscriptHaveDeliberateKeyButNeverMainBehavior() {
-        let urlInput = URLInputPanel(frame: transcriptFrame)
+    func testEmbeddedMouthInputUsesTheNozzlePanelAndNeverCreatesASecondBubble() {
+        let nozzle = NozzleHitPanel(frame: nozzleFrame)
         let transcript = TranscriptPanel(frame: transcriptFrame)
 
-        XCTAssertTrue(urlInput.canBecomeKey)
-        XCTAssertFalse(urlInput.canBecomeMain)
-        XCTAssertTrue(urlInput.becomesKeyOnlyIfNeeded)
+        nozzle.setEmbeddedURLInputPresented(true)
+
+        XCTAssertTrue(nozzle.canBecomeKey)
+        XCTAssertFalse(nozzle.canBecomeMain)
+        XCTAssertTrue(nozzle.becomesKeyOnlyIfNeeded)
+        XCTAssertTrue(nozzle.embeddedURLInputView.isDescendant(of: try! XCTUnwrap(nozzle.contentView)))
+        XCTAssertFalse(nozzle.embeddedURLInputView.isHidden)
+        XCTAssertGreaterThanOrEqual(nozzle.embeddedURLInputView.frame.width, 280)
+        XCTAssertLessThanOrEqual(nozzle.embeddedURLInputView.frame.width, 320)
+        XCTAssertEqual(nozzle.frame.size, NozzleHitPanel.urlInputSize)
+        let placeholderColor = nozzle.embeddedURLInputView.urlField
+            .placeholderAttributedString?
+            .attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+        XCTAssertGreaterThan(placeholderColor?.whiteComponent ?? 0, 0.9)
+        let startColor = nozzle.embeddedURLInputView.startButton.attributedTitle
+            .attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+        XCTAssertGreaterThan(startColor?.whiteComponent ?? 0, 0.9)
         XCTAssertTrue(transcript.canBecomeKey)
         XCTAssertFalse(transcript.canBecomeMain)
         XCTAssertTrue(transcript.becomesKeyOnlyIfNeeded)
     }
 
     func testAuxiliaryPanelsBeginHiddenUntilTheCoordinatorSelectsOne() {
-        let urlInput = URLInputPanel(frame: transcriptFrame)
+        let nozzle = NozzleHitPanel(frame: nozzleFrame)
         let transcript = TranscriptPanel(frame: transcriptFrame)
 
-        XCTAssertFalse(urlInput.isVisible)
+        XCTAssertTrue(nozzle.embeddedURLInputView.isHidden)
         XCTAssertFalse(transcript.isVisible)
     }
 
@@ -167,7 +180,6 @@ final class PanelConfigurationTests: XCTestCase {
             CapsulePanel(frame: capsuleFrame),
             NozzleHitPanel(frame: nozzleFrame),
             TranscriptPanel(frame: transcriptFrame),
-            URLInputPanel(frame: transcriptFrame),
         ]
     }
 }

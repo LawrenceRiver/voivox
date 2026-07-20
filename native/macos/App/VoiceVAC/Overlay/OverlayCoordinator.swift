@@ -62,6 +62,7 @@ final class OverlayCoordinator: WindowCoordinating, VoiceVACInteractionPresentin
 
     func setURLInputPresented(_ isPresented: Bool) {
         isURLInputPresented = isPresented
+        (panels[.nozzle] as? NozzleHitPanel)?.setEmbeddedURLInputPresented(isPresented)
         synchronizePanelVisibility()
     }
 
@@ -184,7 +185,6 @@ final class OverlayCoordinator: WindowCoordinating, VoiceVACInteractionPresentin
         createStaticPanelIfMissing(role: .capsule, frame: layout.capsuleFrame, handlers: handlers)
         createStaticPanelIfMissing(role: .nozzle, frame: layout.nozzleHitFrame)
         createStaticPanelIfMissing(role: .transcript, frame: layout.transcriptFrame)
-        createStaticPanelIfMissing(role: .urlInput, frame: layout.transcriptFrame)
     }
 
     private func createStaticPanelIfMissing(
@@ -234,7 +234,6 @@ final class OverlayCoordinator: WindowCoordinating, VoiceVACInteractionPresentin
             }
         }
         panels[.transcript]?.setFrame(layout.transcriptFrame)
-        panels[.urlInput]?.setFrame(layout.transcriptFrame)
     }
 
     private func rewriteCorrectedPlacementIfNeeded(
@@ -257,7 +256,7 @@ final class OverlayCoordinator: WindowCoordinating, VoiceVACInteractionPresentin
             guard case let .hose(screenID) = role else { return nil }
             return (screenID, role)
         }.sorted { $0.0.rawValue < $1.0.rawValue }.map(\.1)
-        let roles = hoseRoles + [.capsule, .nozzle, .transcript, .urlInput]
+        let roles = hoseRoles + [.capsule, .nozzle, .transcript]
         for role in roles {
             guard let panel = panels[role] else { continue }
             if shouldShow(role) {
@@ -290,8 +289,6 @@ final class OverlayCoordinator: WindowCoordinating, VoiceVACInteractionPresentin
             true
         case .transcript:
             auxiliaryPresentation == .transcript
-        case .urlInput:
-            auxiliaryPresentation == .urlInput
         }
     }
 

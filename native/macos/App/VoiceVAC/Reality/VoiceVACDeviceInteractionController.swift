@@ -81,6 +81,8 @@ final class VoiceVACDeviceInteractionController {
     private(set) var mainDeviceEntity: Entity?
     private(set) var nozzleEntity: Entity?
     private(set) var nozzlePresentationRootEntity: Entity?
+    private(set) var duckbillEntity: Entity?
+    private(set) var nozzleEyeEntities: [Entity] = []
     private(set) var buttonCapEntity: Entity?
     private(set) var readyLightEntity: Entity?
 
@@ -119,6 +121,19 @@ final class VoiceVACDeviceInteractionController {
         let clone = authoredNozzle.clone(recursive: true)
         clone.isEnabled = true
         nozzleEntity = clone
+        guard let duckbill = clone.findEntity(named: "VAC_NOZZLE_DUCKBILL") else {
+            throw VoiceVACDeviceInteractionError.missingEntity("VAC_NOZZLE_DUCKBILL")
+        }
+        let eyeNames = [
+            "VAC_NOZZLE_EYE_L", "VAC_NOZZLE_PUPIL_L",
+            "VAC_NOZZLE_EYE_R", "VAC_NOZZLE_PUPIL_R",
+        ]
+        let eyes = eyeNames.compactMap { clone.findEntity(named: $0) }
+        guard eyes.count == eyeNames.count else {
+            throw VoiceVACDeviceInteractionError.missingEntity("VAC_NOZZLE_SIDE_EYES")
+        }
+        duckbillEntity = duckbill
+        nozzleEyeEntities = eyes
         try applyNozzlePose(.nozzleDocked)
         return clone
     }
@@ -163,6 +178,11 @@ final class VoiceVACDeviceInteractionController {
             throw VoiceVACDeviceInteractionError.missingEntity("VAC_NOZZLE")
         }
         nozzleEntity.transform = try requiredTransform(for: pose)
+        let isDocked = pose == .nozzleDocked
+        setEyesVisible(!isDocked)
+        if isDocked {
+            duckbillEntity?.scale = .one
+        }
         recenterNozzlePresentation()
     }
 
@@ -183,6 +203,8 @@ final class VoiceVACDeviceInteractionController {
         )
         transformed.rotation = simd_normalize(transformed.rotation * dragRotation)
         nozzleEntity.transform = transformed
+        setEyesVisible(progress > 0.05)
+        duckbillEntity?.scale = .one
         recenterNozzlePresentation()
     }
 
@@ -191,33 +213,26 @@ final class VoiceVACDeviceInteractionController {
             throw VoiceVACDeviceInteractionError.missingEntity("VAC_NOZZLE")
         }
         let docked = try requiredTransform(for: .nozzleDocked)
-        let lifted = try requiredTransform(for: .nozzleLiftRotate)
-        let authored: Transform
-        switch frame.stage {
-        case .unlockAndLift:
-            authored = Self.interpolate(from: docked, to: lifted, progress: Float(frame.stageProgress))
-        case .rotateInPlane, .cExtension, .reverseSCurlAndInput:
-            // The URL gesture stays above its dock and bends through Z depth.
-            // Interpolating toward the drag pose here would introduce the old
-            // rightward screen-plane sweep the interaction is meant to avoid.
-            authored = lifted
-        }
+        let operating = try requiredTransform(for: .nozzleLiftRotate)
+        let authored = Self.interpolate(
+            from: docked,
+            to: operating,
+            progress: Float(frame.operatingPoseProgress)
+        )
         var transformed = authored
         let mouthReveal = simd_quatf(
-            angle: Float(frame.mouthRevealRotation),
+            angle: Float(.pi / 2 * frame.mouthTurnProgress),
             axis: SIMD3(1, 0, 0)
         )
-        // This is a screen-space pitch, not a local-roll. The dock pose turns
-        // the narrow side of the nozzle toward the viewer; pre-multiplying
-        // tips its upward-facing mouth through Z until the opening faces the
-        // camera at the end of the reverse-S gesture.
         transformed.rotation = simd_normalize(mouthReveal * authored.rotation)
         nozzleEntity.transform = transformed
+        setEyesVisible(frame.operatingPoseProgress > 0.15)
+        if var duckbillScale = duckbillEntity?.scale {
+            duckbillScale.x = Float(frame.mouthExpansion)
+            duckbillEntity?.scale = duckbillScale
+        }
         recenterNozzlePresentation()
-        // The presentation camera sits on +Z and looks toward -Z. Moving the
-        // presentation root in -Z therefore makes the head curl into the
-        // screen instead of sliding across the desktop to the right.
-        nozzlePresentationRootEntity?.position.z -= Float(frame.intoScreenDepth)
+        nozzlePresentationRootEntity?.position.z -= Float(frame.depthRetreat)
     }
 
     func bindNozzlePresentationRoot(_ root: Entity) {
@@ -257,6 +272,12 @@ final class VoiceVACDeviceInteractionController {
     private func recenterNozzlePresentation() {
         guard let nozzleEntity, let nozzlePresentationRootEntity else { return }
         nozzlePresentationRootEntity.position = -nozzleEntity.position
+    }
+
+    private func setEyesVisible(_ isVisible: Bool) {
+        for eye in nozzleEyeEntities {
+            eye.isEnabled = isVisible
+        }
     }
 
     private static func interpolate(

@@ -4,19 +4,26 @@ import AppKit
 final class NozzleHitPanel: NSPanel, PanelControlling {
     static let dockedSize = CGSize(width: 96, height: 96)
     static let deployedSize = CGSize(width: 144, height: 144)
+    static let urlInputSize = CGSize(width: 344, height: 168)
 
     let role = PanelRole.nozzle
     let nozzleRealityView: NozzleRealityView
     let interactionView: NozzleInteractionHitView
+    let embeddedURLInputView: NozzleURLInputView
     let closeButton = NSButton(title: "×", target: nil, action: nil)
     private weak var interactionRuntime: VoiceVACInteractionRuntime?
+    private var nozzleCenter: CGPoint
+    private var hoseTangent = CGVector(dx: 0, dy: 1)
+    private var showsCloseButton = false
 
     init(
         frame: CGRect,
         deviceController: VoiceVACDeviceInteractionController = VoiceVACDeviceInteractionController(),
-        interactionRuntime: VoiceVACInteractionRuntime? = nil
+        interactionRuntime: VoiceVACInteractionRuntime? = nil,
+        onURLSubmit: @escaping (URL) -> Void = { _ in }
     ) {
         self.interactionRuntime = interactionRuntime
+        nozzleCenter = CGPoint(x: frame.midX, y: frame.midY)
         nozzleRealityView = NozzleRealityView(
             frame: CGRect(origin: .zero, size: Self.dockedSize),
             deviceController: deviceController
@@ -25,6 +32,7 @@ final class NozzleHitPanel: NSPanel, PanelControlling {
             frame: CGRect(origin: .zero, size: Self.dockedSize),
             interactionRuntime: interactionRuntime
         )
+        embeddedURLInputView = NozzleURLInputView(onSubmit: onURLSubmit)
         super.init(
             contentRect: frame,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -34,11 +42,16 @@ final class NozzleHitPanel: NSPanel, PanelControlling {
         configureVoiceVACPanel(self, role: role)
 
         let root = NSView(frame: CGRect(origin: .zero, size: frame.size))
+        root.wantsLayer = true
+        root.layer?.masksToBounds = true
         root.autoresizingMask = [.width, .height]
         nozzleRealityView.autoresizingMask = []
         interactionView.autoresizingMask = []
         root.addSubview(nozzleRealityView)
         root.addSubview(interactionView)
+
+        embeddedURLInputView.isHidden = true
+        root.addSubview(embeddedURLInputView)
 
         closeButton.isBordered = false
         closeButton.font = .systemFont(ofSize: 24, weight: .medium)
@@ -51,6 +64,7 @@ final class NozzleHitPanel: NSPanel, PanelControlling {
         closeButton.setAccessibilityLabel("Retract nozzle")
         root.addSubview(closeButton)
         contentView = root
+        becomesKeyOnlyIfNeeded = true
         layoutContent(
             nozzleCenter: CGPoint(x: frame.width / 2, y: frame.height / 2),
             tangent: CGVector(dx: 0, dy: 1),
@@ -58,11 +72,14 @@ final class NozzleHitPanel: NSPanel, PanelControlling {
         )
     }
 
-    override var canBecomeKey: Bool { false }
+    override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
     func setDeployed(center: CGPoint, hoseTangent: CGVector, showsCloseButton: Bool) {
-        let size = Self.deployedSize
+        nozzleCenter = center
+        self.hoseTangent = hoseTangent
+        self.showsCloseButton = showsCloseButton
+        let size = embeddedURLInputView.isHidden ? Self.deployedSize : Self.urlInputSize
         setFrame(
             CGRect(
                 x: center.x - size.width / 2,
@@ -81,6 +98,10 @@ final class NozzleHitPanel: NSPanel, PanelControlling {
     }
 
     func setDocked(frame: CGRect) {
+        nozzleCenter = CGPoint(x: frame.midX, y: frame.midY)
+        hoseTangent = CGVector(dx: 0, dy: 1)
+        showsCloseButton = false
+        embeddedURLInputView.setPresented(false)
         setFrame(frame, display: true)
         layoutContent(
             nozzleCenter: CGPoint(x: frame.width / 2, y: frame.height / 2),
@@ -88,6 +109,34 @@ final class NozzleHitPanel: NSPanel, PanelControlling {
             presentationSize: Self.dockedSize
         )
         closeButton.isHidden = true
+    }
+
+    /// The URL control lives on the widened duckbill itself. Expanding this
+    /// transparent panel gives RealityKit room for the mouth and keeps the
+    /// native text field directly over the 3D intake instead of creating a
+    /// second floating speech bubble.
+    func setEmbeddedURLInputPresented(_ presented: Bool) {
+        embeddedURLInputView.setPresented(presented)
+        let size = presented ? Self.urlInputSize : Self.deployedSize
+        setFrame(
+            CGRect(
+                x: nozzleCenter.x - size.width / 2,
+                y: nozzleCenter.y - size.height / 2,
+                width: size.width,
+                height: size.height
+            ),
+            display: true
+        )
+        layoutContent(
+            nozzleCenter: CGPoint(x: size.width / 2, y: size.height / 2),
+            tangent: hoseTangent,
+            presentationSize: size
+        )
+        closeButton.isHidden = !showsCloseButton
+        if presented {
+            makeKey()
+            makeFirstResponder(embeddedURLInputView.urlField)
+        }
     }
 
     private func layoutContent(
@@ -103,6 +152,11 @@ final class NozzleHitPanel: NSPanel, PanelControlling {
         )
         nozzleRealityView.frame = nozzleFrame
         interactionView.frame = nozzleFrame
+        let inputSize = embeddedURLInputView.frame.size
+        embeddedURLInputView.frame.origin = CGPoint(
+            x: nozzleCenter.x - inputSize.width / 2,
+            y: nozzleCenter.y - inputSize.height / 2
+        )
         let close = NozzleRetractionController.closeButtonPoint(
             nozzlePoint: nozzleCenter,
             hoseTangent: tangent

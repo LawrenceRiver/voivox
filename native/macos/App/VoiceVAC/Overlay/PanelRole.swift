@@ -5,7 +5,6 @@ enum PanelRole: Hashable {
     case capsule
     case nozzle
     case transcript
-    case urlInput
 
     var level: Int {
         switch self {
@@ -13,7 +12,6 @@ enum PanelRole: Hashable {
         case .capsule: 4
         case .nozzle: 6
         case .transcript: 7
-        case .urlInput: 7
         }
     }
 }

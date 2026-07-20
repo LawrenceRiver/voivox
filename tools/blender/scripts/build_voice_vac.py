@@ -41,6 +41,7 @@ RUNTIME_NODES = [
     "VAC_DEVICE_ROOT",
     "VAC_PORT",
     "VAC_NOZZLE",
+    "VAC_NOZZLE_DUCKBILL",
     "VAC_NOZZLE_TIP",
     "VAC_BUTTON_BASE",
     "VAC_BUTTON_CAP",
@@ -516,9 +517,16 @@ def build_device(
     nozzle.empty_display_type = "ARROWS"
     nozzle.location = DOCK_LOCATION
     nozzle.rotation_mode = "XYZ"
-    nozzle.rotation_euler = (0.0, math.radians(90.0), math.radians(180.0))
+    # Docked: the local -Y mouth normal points toward camera +Z, while the
+    # long X mouth axis stands vertically in the screen plane.
+    nozzle.rotation_euler = (math.radians(-90.0), 0.0, math.radians(90.0))
     nozzle["voice_vac_pivot"] = "rotary_collar_center"
     parent(nozzle, device_root)
+
+    duckbill = add_empty("VAC_NOZZLE_DUCKBILL", collection)
+    duckbill.empty_display_type = "CUBE"
+    duckbill["voice_vac_runtime_control"] = "mouth_expansion"
+    parent(duckbill, nozzle)
 
     nozzle_shell = superellipse_loft(
         "VAC_NOZZLE_SHELL",
@@ -536,7 +544,7 @@ def build_device(
         cap_start=True,
         cap_end=False,
     )
-    parent(nozzle_shell, nozzle)
+    parent(nozzle_shell, duckbill)
     add_bevel(nozzle_shell, 0.0011, 3)
 
     throat_collar = lathe_mesh(
@@ -561,7 +569,7 @@ def build_device(
         material=materials["MAT_TOY_IVORY"],
         collection=collection,
     )
-    parent(nozzle_tip, nozzle)
+    parent(nozzle_tip, duckbill)
     add_bevel(nozzle_tip, 0.0008, 3)
 
     gasket = superellipse_ring(
@@ -574,7 +582,7 @@ def build_device(
         collection=collection,
         segments=56,
     )
-    parent(gasket, nozzle)
+    parent(gasket, duckbill)
 
     mouth = superellipse_disc(
         "VAC_NOZZLE_MOUTH",
@@ -585,7 +593,7 @@ def build_device(
         material=materials["MAT_MOUTH_DARK"],
         collection=collection,
     )
-    parent(mouth, nozzle)
+    parent(mouth, duckbill)
 
     # Two compact 3D eyes live on the upper face of the duckbill. They are
     # authored meshes rather than a 2D overlay, so they rotate with the head
@@ -613,8 +621,11 @@ def build_device(
             collection,
             segments=40,
         )
-        eye.location = (side * 0.027, -0.089, 0.019)
-        parent(eye, nozzle)
+        # The eyes live on the upper side shell. Their local lathe axis is Y,
+        # so a +90 degree X turn makes them protrude along the shell's +Z side.
+        eye.location = (side * 0.027, -0.058, 0.025)
+        eye.rotation_euler = (math.radians(90.0), 0.0, 0.0)
+        parent(eye, duckbill)
 
         pupil = lathe_mesh(
             f"VAC_NOZZLE_PUPIL_{suffix}",
@@ -623,8 +634,9 @@ def build_device(
             collection,
             segments=32,
         )
-        pupil.location = (side * 0.027, -0.100, 0.019)
-        parent(pupil, nozzle)
+        pupil.location = (side * 0.027, -0.058, 0.031)
+        pupil.rotation_euler = (math.radians(90.0), 0.0, 0.0)
+        parent(pupil, duckbill)
 
     button_base = lathe_mesh(
         "VAC_BUTTON_BASE",
@@ -687,6 +699,7 @@ def build_device(
         "device_root": device_root,
         "port": port,
         "nozzle": nozzle,
+        "duckbill": duckbill,
         "nozzle_tip": nozzle_tip,
         "button_base": button_base,
         "button_cap": button_cap,
@@ -890,8 +903,8 @@ def build_actions(device: dict[str, bpy.types.Object], hose: dict[str, bpy.types
         nozzle,
         "VAC_NOZZLE_POSES",
         [
-            (1, DOCK_LOCATION, (0.0, math.radians(90.0), math.radians(180.0)), Vector((1.0, 1.0, 1.0))),
-            (10, DOCK_LOCATION + Vector((0.0, 0.010, 0.018)), (0.0, math.radians(90.0), math.radians(180.0)), Vector((1.0, 1.0, 1.0))),
+            (1, DOCK_LOCATION, (math.radians(-90.0), 0.0, math.radians(90.0)), Vector((1.0, 1.0, 1.0))),
+            (10, DOCK_LOCATION, (0.0, 0.0, math.radians(180.0)), Vector((1.0, 1.0, 1.0))),
             (24, tip_point + Vector((0.0, -0.018, 0.0)), (0.0, 0.0, math.radians(-8.0)), Vector((1.0, 1.0, 1.0))),
             (36, tip_point + Vector((0.0, -0.012, 0.0)), (math.radians(4.0), 0.0, math.radians(-8.0)), Vector((1.0, 0.92, 1.04))),
         ],

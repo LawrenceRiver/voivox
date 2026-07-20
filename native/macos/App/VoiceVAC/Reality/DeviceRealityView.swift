@@ -24,9 +24,11 @@ final class DeviceRealityView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.isOpaque = false
+        layer?.masksToBounds = true
 
         realityView.autoresizingMask = [.width, .height]
         realityView.wantsLayer = true
+        realityView.layer?.masksToBounds = true
         realityView.layer?.isOpaque = false
         realityView.environment.background = .color(.clear)
         addSubview(realityView)
@@ -127,8 +129,11 @@ final class NozzleRealityView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.isOpaque = false
+        layer?.masksToBounds = true
 
         realityView.autoresizingMask = [.width, .height]
+        realityView.wantsLayer = true
+        realityView.layer?.masksToBounds = true
         realityView.environment.background = .color(.clear)
         addSubview(realityView)
 

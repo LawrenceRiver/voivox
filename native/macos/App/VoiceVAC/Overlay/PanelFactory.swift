@@ -59,17 +59,13 @@ final class LivePanelFactory: PanelFactory {
             NozzleHitPanel(
                 frame: frame,
                 deviceController: deviceController,
-                interactionRuntime: interactionRuntime
-            )
-        case .transcript:
-            TranscriptPanel(frame: frame, store: store)
-        case .urlInput:
-            URLInputPanel(
-                frame: frame,
-                onSubmit: { [weak interactionRuntime] url in
+                interactionRuntime: interactionRuntime,
+                onURLSubmit: { [weak interactionRuntime] url in
                     interactionRuntime?.submitURL(url)
                 }
             )
+        case .transcript:
+            TranscriptPanel(frame: frame, store: store)
         }
     }
 }

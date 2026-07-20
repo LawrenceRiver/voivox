@@ -216,7 +216,6 @@ final class ScreenReconcilerTests: XCTestCase {
         XCTAssertTrue(try! XCTUnwrap(fixture.factory.panel(for: .capsule)).isVisible)
         XCTAssertTrue(try! XCTUnwrap(fixture.factory.panel(for: .nozzle)).isVisible)
         XCTAssertFalse(try! XCTUnwrap(fixture.factory.panel(for: .transcript)).isVisible)
-        XCTAssertFalse(try! XCTUnwrap(fixture.factory.panel(for: .urlInput)).isVisible)
     }
 
     func testTranscriptAndURLInputAreMutuallyExclusive() {
@@ -228,19 +227,16 @@ final class ScreenReconcilerTests: XCTestCase {
         fixture.coordinator.start(with: store)
 
         let transcript = try! XCTUnwrap(fixture.factory.panel(for: .transcript))
-        let urlInput = try! XCTUnwrap(fixture.factory.panel(for: .urlInput))
         XCTAssertTrue(transcript.isVisible)
-        XCTAssertFalse(urlInput.isVisible)
 
         fixture.coordinator.setURLInputPresented(true)
 
         XCTAssertFalse(transcript.isVisible)
-        XCTAssertTrue(urlInput.isVisible)
+        XCTAssertEqual(fixture.coordinator.auxiliaryPresentation, .urlInput)
 
         fixture.coordinator.setURLInputPresented(false)
 
         XCTAssertTrue(transcript.isVisible)
-        XCTAssertFalse(urlInput.isVisible)
     }
 
     func testTranscriptVisibilityTracksPreviewChangesWithoutShowingURLInput() async {
@@ -249,13 +245,11 @@ final class ScreenReconcilerTests: XCTestCase {
         let store = VoiceVACStore()
         fixture.coordinator.start(with: store)
         let transcript = try! XCTUnwrap(fixture.factory.panel(for: .transcript))
-        let urlInput = try! XCTUnwrap(fixture.factory.panel(for: .urlInput))
 
         store.send(.transcriptPreviewChanged("captured speech"))
         await Task.yield()
 
         XCTAssertTrue(transcript.isVisible)
-        XCTAssertFalse(urlInput.isVisible)
     }
 
     func testBackgroundDragMovesAndClampsButPersistsOnlyOnMouseUp() {

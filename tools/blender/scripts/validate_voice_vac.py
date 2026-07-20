@@ -29,6 +29,7 @@ REQUIRED_OBJECTS = {
     "VAC_DEVICE_ROOT",
     "VAC_PORT",
     "VAC_NOZZLE",
+    "VAC_NOZZLE_DUCKBILL",
     "VAC_NOZZLE_TIP",
     "VAC_BUTTON_BASE",
     "VAC_BUTTON_CAP",
@@ -67,9 +68,8 @@ MESH_BINARY_ENDIAN_MARKER = 0x01020304
 EXPECTED_SCHEMA_VERSION = 2
 EXPECTED_PREVIEW_SIZE = (1800, 1100)
 EXPECTED_DOCK_TRANSLATION = (-0.132, -0.037, 0.002)
-# The Y quarter-turn presents the narrow vacuum-head silhouette while the Z
-# half-turn reverses the authored negative-Y body axis from down to up.
-EXPECTED_DOCK_ROTATION = (0.0, -math.sqrt(0.5), 0.0, math.sqrt(0.5))
+# Docked, the mouth points toward the camera and its long axis is vertical.
+EXPECTED_DOCK_ROTATION = (0.5, -0.5, -0.5, 0.5)
 EXPECTED_BUTTON_UP_TRANSLATION = (0.128, 0.006, 0.002)
 EXPECTED_BUTTON_TRAVEL_METERS = 0.009
 REQUIRED_NAMED_POSES = {
@@ -955,7 +955,7 @@ def validate_usdz(check: Validation, path: Path, required_names: set[str], contr
                 check.require(
                     triplet_close(
                         usd_triplet(nozzle_block, "xformOp:rotateXYZ"),
-                        (180.0, 90.0, 0.0),
+                        (-90.0, 0.0, 90.0),
                         tolerance=1.0e-3,
                     ),
                     "VoiceVACDevice.usdz duckbill does not point upward while docked",
