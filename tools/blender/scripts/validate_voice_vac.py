@@ -47,7 +47,12 @@ REQUIRED_MATERIALS = {
     "MAT_EYE_WHITE",
     "MAT_EYE_DARK",
 }
-REQUIRED_TOY_EYES = {"VAC_NOZZLE_EYE_L", "VAC_NOZZLE_EYE_R"}
+REQUIRED_TOY_EYES = {
+    "VAC_NOZZLE_EYE_L",
+    "VAC_NOZZLE_EYE_R",
+    "VAC_NOZZLE_PUPIL_L",
+    "VAC_NOZZLE_PUPIL_R",
+}
 REQUIRED_MESH_OBJECTS = {
     "VAC_PORT",
     "VAC_NOZZLE_TIP",
@@ -364,11 +369,70 @@ def validate_scene(check: Validation) -> dict[str, int]:
     missing_eyes = REQUIRED_TOY_EYES - object_names
     check.require(not missing_eyes, f"missing toy eye meshes: {sorted(missing_eyes)}")
 
+    collar = bpy.data.objects.get("VAC_NOZZLE_COLLAR")
+    if collar is not None:
+        check.require(
+            collar.get("voice_vac_connector_role") == "hose_capture",
+            "VAC_NOZZLE_COLLAR must declare its hose-capture role",
+        )
+        collar_extents = [
+            max(corner[axis] for corner in collar.bound_box) - min(corner[axis] for corner in collar.bound_box)
+            for axis in range(3)
+        ]
+        check.require(max(collar_extents) >= 0.080, "hose-capture collar must be wider than the largest 52 mm hose rib")
+        check.require(min(collar_extents) >= 0.034, "hose-capture collar must be long enough to visibly overlap the hose")
+
+    for name in sorted(REQUIRED_TOY_EYES):
+        applique = bpy.data.objects.get(name)
+        if applique is None:
+            continue
+        check.require(
+            applique.get("voice_vac_eye_style") == "applique",
+            f"{name} must declare applique eye styling",
+        )
+        extents = [
+            max(corner[axis] for corner in applique.bound_box) - min(corner[axis] for corner in applique.bound_box)
+            for axis in range(3)
+        ]
+        check.require(
+            min(extents) / max(extents) < 0.35,
+            f"{name} must be a shallow pasted-on mesh rather than a sphere",
+        )
+
+    for suffix in ("L", "R"):
+        eye = bpy.data.objects.get(f"VAC_NOZZLE_EYE_{suffix}")
+        pupil = bpy.data.objects.get(f"VAC_NOZZLE_PUPIL_{suffix}")
+        if eye is None or pupil is None:
+            continue
+        eye_extents = [
+            max(corner[axis] for corner in eye.bound_box) - min(corner[axis] for corner in eye.bound_box)
+            for axis in range(3)
+        ]
+        pupil_extents = [
+            max(corner[axis] for corner in pupil.bound_box) - min(corner[axis] for corner in pupil.bound_box)
+            for axis in range(3)
+        ]
+        check.require(max(eye_extents) >= 0.032, f"eye {suffix} applique must remain readable at desktop scale")
+        check.require(max(pupil_extents) >= 0.014, f"pupil {suffix} applique must remain readable at desktop scale")
+        check.require(
+            pupil.location.z >= eye.location.z + 0.003,
+            f"pupil {suffix} must sit fully above the eye applique instead of intersecting it",
+        )
+
     for name in REQUIRED_OBJECTS:
         check.require(sum(obj.name == name for obj in bpy.data.objects) == 1, f"scene node {name} must exist exactly once")
 
     missing_materials = REQUIRED_MATERIALS - set(bpy.data.materials.keys())
     check.require(not missing_materials, f"missing stable materials: {sorted(missing_materials)}")
+    toy_ivory = bpy.data.materials.get("MAT_TOY_IVORY")
+    eye_white = bpy.data.materials.get("MAT_EYE_WHITE")
+    if toy_ivory is not None and eye_white is not None:
+        toy_value = sum(float(channel) for channel in toy_ivory.diffuse_color[:3]) / 3.0
+        eye_value = sum(float(channel) for channel in eye_white.diffuse_color[:3]) / 3.0
+        check.require(
+            eye_value - toy_value >= 0.30,
+            "white eye appliques must visibly separate from the warm ivory nozzle at desktop scale",
+        )
 
     missing_actions = REQUIRED_ACTIONS - set(bpy.data.actions.keys())
     check.require(not missing_actions, f"missing deterministic pose actions: {sorted(missing_actions)}")

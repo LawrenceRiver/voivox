@@ -35,8 +35,8 @@
   ],
   "exports": {
     "VoiceVACDevice.usdz": {
-      "byteCount": 418828,
-      "sha256": "39b01a06389a8729f28f0870f88f534061ddce503048736b3494807b5066e2b1"
+      "byteCount": 445844,
+      "sha256": "ceca034de8e26a6fcebd83782cfa9cfd25196b93c43da70d50834c2d5ade4dfb"
     },
     "VoiceVACHose.meshbin": {
       "byteCount": 814808,
@@ -44,7 +44,7 @@
     },
     "VoiceVACHose.usdz": {
       "byteCount": 830433,
-      "sha256": "3a7e379761acb543bfe7a75a4cf22b734c997bb61c04556071abcc6a2c629267"
+      "sha256": "15692e97b3805a38470e6b30fdc5e3a8b7c5da2f77096b2774d6f7fe5bdd6681"
     }
   },
   "hoseRuntime": {
@@ -251,20 +251,20 @@
     "VAC_NOZZLE": {
       "max": [
         0.087,
-        0.01,
-        0.036
+        0.02,
+        0.042312
       ],
       "min": [
         -0.087,
         -0.1036,
-        -0.03584
+        -0.042312
       ]
     },
     "VAC_NOZZLE_DUCKBILL": {
       "max": [
         0.087,
         0.002,
-        0.036
+        0.031554
       ],
       "min": [
         -0.087,
@@ -378,19 +378,19 @@
         "vertices": 8766
       },
       "VAC_NOZZLE_COLLAR": {
-        "polygons": 192,
-        "triangles": 384,
-        "vertices": 256
+        "polygons": 256,
+        "triangles": 512,
+        "vertices": 320
       },
       "VAC_NOZZLE_EYE_L": {
-        "polygons": 280,
-        "triangles": 480,
-        "vertices": 242
+        "polygons": 440,
+        "triangles": 792,
+        "vertices": 398
       },
       "VAC_NOZZLE_EYE_R": {
-        "polygons": 280,
-        "triangles": 480,
-        "vertices": 242
+        "polygons": 440,
+        "triangles": 792,
+        "vertices": 398
       },
       "VAC_NOZZLE_GASKET": {
         "polygons": 224,
@@ -403,14 +403,14 @@
         "vertices": 57
       },
       "VAC_NOZZLE_PUPIL_L": {
-        "polygons": 192,
-        "triangles": 320,
-        "vertices": 162
+        "polygons": 360,
+        "triangles": 648,
+        "vertices": 326
       },
       "VAC_NOZZLE_PUPIL_R": {
-        "polygons": 192,
-        "triangles": 320,
-        "vertices": 162
+        "polygons": 360,
+        "triangles": 648,
+        "vertices": 326
       },
       "VAC_NOZZLE_SHELL": {
         "polygons": 504,
@@ -433,9 +433,9 @@
         "vertices": 449
       }
     },
-    "polygons": 15336,
-    "triangles": 29816,
-    "vertices": 15229
+    "polygons": 16056,
+    "triangles": 31224,
+    "vertices": 15933
   },
   "nominalDockTransform": {
     "rotationQuaternion": [
@@ -488,7 +488,7 @@
   "product": "Voice VAC",
   "reproducibility": {
     "mode": "semantic-contract-v1",
-    "sceneSemanticSHA256": "fbb6e914c0d52b5facb0bf12f4581824a198804cb531cfc8cf5bd7360c2e9b25",
+    "sceneSemanticSHA256": "733e3b0c73d4a08cb08e5e5f51bfae42fbbaacdc4ef4f19dfc8e7797be66c471",
     "statement": "Normalized scene semantics are reproducible; Blender and USD container bytes are not promised identical."
   },
   "runtimeNodes": [
@@ -768,8 +768,8 @@
     "weightedVertexCount": 8766
   },
   "sourceHashes": {
-    "build_voice_vac.py": "b7e2999048ffe0a27f03cfa5fa6e81966fa2d91a1a83e980900c20ef8d833041",
-    "voice-vac-machine.blend": "86b463159247d443fb32e4df6d9163e55b1afbf2f226618add55cbb8870116d0"
+    "build_voice_vac.py": "359eb6c69619a8bcd1331ee39e1fac6b9f5abe9f207df55aab59927de5c44284",
+    "voice-vac-machine.blend": "6b01a1a66a2e93a90e14c5da17d7390a8f3a5fe2b77449bc92595b656857df1c"
   },
   "units": {
     "linear": "meter",

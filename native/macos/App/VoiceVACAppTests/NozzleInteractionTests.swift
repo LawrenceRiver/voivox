@@ -66,7 +66,17 @@ final class NozzleInteractionTests: XCTestCase {
         XCTAssertLessThan(abs(simd_dot(eastRotation.vector, northRotation.vector)), 0.99)
     }
 
-    func testHoseTerminatesAtTheRearCylinderRatherThanUnderTheNozzle() throws {
+    func testHoseEndpointAdvancesEightPointsIntoTheRearSocket() {
+        let endpoint = NozzlePresentationKinematics.rearCylinderPoint(
+            forNozzleCenter: CGPoint(x: 200, y: 100),
+            hoseTangent: CGVector(dx: 3, dy: 4)
+        )
+
+        XCTAssertEqual(endpoint.x, 204.8, accuracy: 0.001)
+        XCTAssertEqual(endpoint.y, 106.4, accuracy: 0.001)
+    }
+
+    func testDeployedHoseCentrelineEntersTheRearSocket() throws {
         let source = HoseRenderSnapshotSource()
         let session = HoseRenderSession(source: source, seed: 194)
         try session.dock(in: CGRect(x: -48, y: -48, width: 96, height: 96))
@@ -82,7 +92,7 @@ final class NozzleInteractionTests: XCTestCase {
 
         let endpoint = try XCTUnwrap(source.latest?.centerline.last)
         XCTAssertEqual(endpoint.x, 0, accuracy: 0.000_01)
-        XCTAssertEqual(endpoint.y, -0.272, accuracy: 0.000_01)
+        XCTAssertEqual(endpoint.y, -0.308, accuracy: 0.000_01)
     }
 
     func testDoubleClickTimelineIsDeterministicAndUsesFourOrderedStages() {

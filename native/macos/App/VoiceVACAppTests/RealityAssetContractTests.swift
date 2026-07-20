@@ -112,13 +112,39 @@ final class RealityAssetContractTests: XCTestCase {
         XCTAssertTrue(usdText.contains("VAC_NOZZLE_DUCKBILL"))
         XCTAssertTrue(usdText.contains("VAC_NOZZLE_EYE_L"))
         XCTAssertTrue(usdText.contains("VAC_NOZZLE_EYE_R"))
+        XCTAssertTrue(usdText.contains("voice_vac_eye_style"))
+        XCTAssertTrue(usdText.contains("applique"))
+        XCTAssertTrue(usdText.contains("voice_vac_connector_role"))
+        XCTAssertTrue(usdText.contains("hose_capture"))
 
         let device = try await Entity(contentsOf: nozzleURL)
         let duckbill = try XCTUnwrap(device.findEntity(named: "VAC_NOZZLE_DUCKBILL"))
         let leftEye = try XCTUnwrap(device.findEntity(named: "VAC_NOZZLE_EYE_L"))
         let rightEye = try XCTUnwrap(device.findEntity(named: "VAC_NOZZLE_EYE_R"))
-        XCTAssertTrue(leftEye.parent === duckbill)
-        XCTAssertTrue(rightEye.parent === duckbill)
+        let leftPupil = try XCTUnwrap(device.findEntity(named: "VAC_NOZZLE_PUPIL_L"))
+        let rightPupil = try XCTUnwrap(device.findEntity(named: "VAC_NOZZLE_PUPIL_R"))
+
+        for applique in [leftEye, rightEye, leftPupil, rightPupil] {
+            XCTAssertTrue(applique.parent === duckbill)
+            let extents = DeviceRealityView.activeVisualBounds(entity: applique).extents
+            let dimensions = [extents.x, extents.y, extents.z].sorted()
+            let minimum = try XCTUnwrap(dimensions.first)
+            let maximum = try XCTUnwrap(dimensions.last)
+            XCTAssertLessThan(
+                minimum / maximum,
+                0.35,
+                "\(applique.name) must be a shallow pasted-on applique, not a sphere"
+            )
+        }
+
+        for eye in [leftEye, rightEye] {
+            let extents = DeviceRealityView.activeVisualBounds(entity: eye).extents
+            XCTAssertGreaterThanOrEqual(max(extents.x, extents.y, extents.z), 0.032)
+        }
+        for pupil in [leftPupil, rightPupil] {
+            let extents = DeviceRealityView.activeVisualBounds(entity: pupil).extents
+            XCTAssertGreaterThanOrEqual(max(extents.x, extents.y, extents.z), 0.014)
+        }
     }
 
     func testBundledUSDZIntegrityHierarchyAndStaticRestPose() async throws {

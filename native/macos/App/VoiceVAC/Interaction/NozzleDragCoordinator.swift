@@ -5,11 +5,12 @@ import simd
 import VoiceVACCore
 
 /// Screen-space relation between the user-held suction head and the hose.
-/// The point being dragged is the centre of the visible duckbill, while the
-/// tube must meet its exposed rear cylinder rather than disappear underneath
-/// the model. The default authored nozzle points downward on screen.
+/// The point being dragged is the authored rear-socket pivot. The hose centreline
+/// advances slightly beyond that pivot so its final ribs are visibly captured by
+/// the connector collar instead of ending beside it. The default authored nozzle
+/// points downward on screen.
 enum NozzlePresentationKinematics {
-    static let rearCylinderOffset: CGFloat = 28
+    static let hoseSocketInsertionDepth: CGFloat = 8
 
     static func normalizedTangent(_ tangent: CGVector) -> CGVector {
         let length = hypot(tangent.dx, tangent.dy)
@@ -23,8 +24,8 @@ enum NozzlePresentationKinematics {
     ) -> CGPoint {
         let tangent = normalizedTangent(hoseTangent)
         return CGPoint(
-            x: center.x - tangent.dx * rearCylinderOffset,
-            y: center.y - tangent.dy * rearCylinderOffset
+            x: center.x + tangent.dx * hoseSocketInsertionDepth,
+            y: center.y + tangent.dy * hoseSocketInsertionDepth
         )
     }
 

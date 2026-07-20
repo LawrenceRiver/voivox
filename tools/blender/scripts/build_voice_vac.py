@@ -192,7 +192,11 @@ def build_materials() -> dict[str, bpy.types.Material]:
         ),
         "MAT_TOY_IVORY": create_material(
             "MAT_TOY_IVORY",
-            (0.70, 0.64, 0.52, 1.0),
+            # A restrained warm ivory keeps the nozzle toy-like without the
+            # saturated yellow cast of the retired model.  It is deliberately
+            # darker than the eye appliques so their pasted-on silhouette is
+            # still readable in the 144 pt floating panel.
+            (0.52, 0.45, 0.34, 1.0),
             metallic=0.02,
             roughness=0.31,
             coat_weight=0.27,
@@ -549,7 +553,13 @@ def build_device(
 
     throat_collar = lathe_mesh(
         "VAC_NOZZLE_COLLAR",
-        [(0.010, 0.029), (0.004, 0.034), (-0.003, 0.035), (-0.010, 0.031)],
+        [
+            (0.020, 0.032),
+            (0.014, 0.038),
+            (0.005, 0.041),
+            (-0.006, 0.040),
+            (-0.015, 0.034),
+        ],
         materials["MAT_CHARCOAL_RUBBER"],
         collection,
         segments=64,
@@ -558,6 +568,7 @@ def build_device(
         cap_start=False,
         cap_end=False,
     )
+    throat_collar["voice_vac_connector_role"] = "hose_capture"
     parent(throat_collar, nozzle)
 
     nozzle_tip = superellipse_ring(
@@ -595,48 +606,52 @@ def build_device(
     )
     parent(mouth, duckbill)
 
-    # Two compact 3D eyes live on the upper face of the duckbill. They are
-    # authored meshes rather than a 2D overlay, so they rotate with the head
-    # while dragging and remain legible in the detached RealityKit panel.
-    eye_profile = [
-        (-0.010, 0.001),
-        (-0.007, 0.006),
-        (-0.002, 0.010),
-        (0.004, 0.010),
-        (0.008, 0.006),
-        (0.011, 0.001),
-    ]
-    pupil_profile = [
-        (-0.0048, 0.001),
-        (-0.0032, 0.0038),
-        (0.0000, 0.0052),
-        (0.0032, 0.0038),
-        (0.0048, 0.001),
-    ]
+    # Shallow applique eyes sit on the upper side of the duckbill like small
+    # toy stickers. They remain authored 3D meshes, but their relief is only a
+    # few millimetres rather than the former marble-like lathed spheres.
     for side, suffix in ((-1.0, "L"), (1.0, "R")):
-        eye = lathe_mesh(
+        eye = superellipse_loft(
             f"VAC_NOZZLE_EYE_{suffix}",
-            eye_profile,
+            [
+                (0.0000, 0.0172, 0.0132, 3.1, 0.0000),
+                (0.0013, 0.0178, 0.0136, 3.1, 0.0000),
+                (0.0026, 0.0166, 0.0126, 3.1, 0.0000),
+            ],
             materials["MAT_EYE_WHITE"],
             collection,
-            segments=40,
+            segments=44,
+            cap_start=True,
+            cap_end=True,
         )
-        # The eyes live on the upper side shell. Their local lathe axis is Y,
-        # so a +90 degree X turn makes them protrude along the shell's +Z side.
-        eye.location = (side * 0.027, -0.058, 0.025)
+        # The loft axis is local Y; a +90 degree X turn makes its very shallow
+        # depth protrude along the shell's +Z side.
+        eye.location = (side * 0.029, -0.058, 0.025)
         eye.rotation_euler = (math.radians(90.0), 0.0, 0.0)
+        eye["voice_vac_eye_style"] = "applique"
         parent(eye, duckbill)
+        add_bevel(eye, 0.0003, 2)
 
-        pupil = lathe_mesh(
+        pupil = superellipse_loft(
             f"VAC_NOZZLE_PUPIL_{suffix}",
-            pupil_profile,
+            [
+                (0.0000, 0.0064, 0.0074, 2.7, 0.0000),
+                (0.0007, 0.0068, 0.0078, 2.7, 0.0000),
+                (0.0014, 0.0061, 0.0071, 2.7, 0.0000),
+            ],
             materials["MAT_EYE_DARK"],
             collection,
-            segments=32,
+            segments=36,
+            cap_start=True,
+            cap_end=True,
         )
-        pupil.location = (side * 0.027, -0.058, 0.031)
+        # Leave a real air gap above the 2.6 mm eye relief.  The earlier pupil
+        # intersected the eye base and disappeared through RealityKit's depth
+        # test even though the USD hierarchy was technically correct.
+        pupil.location = (side * 0.028, -0.061, 0.0284)
         pupil.rotation_euler = (math.radians(90.0), 0.0, 0.0)
+        pupil["voice_vac_eye_style"] = "applique"
         parent(pupil, duckbill)
+        add_bevel(pupil, 0.0002, 2)
 
     button_base = lathe_mesh(
         "VAC_BUTTON_BASE",
