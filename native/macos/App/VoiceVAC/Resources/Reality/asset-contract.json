@@ -35,8 +35,8 @@
   ],
   "exports": {
     "VoiceVACDevice.usdz": {
-      "byteCount": 424560,
-      "sha256": "3fc1bd0cb8e4d6387713905bcb2b51084eb4fdb21176bd9226df82852bf8bf79"
+      "byteCount": 387680,
+      "sha256": "3bbacac212e74f30933c79f64839d64c9b85dd244d6fbff00988527aab541573"
     },
     "VoiceVACHose.meshbin": {
       "byteCount": 814808,
@@ -44,7 +44,7 @@
     },
     "VoiceVACHose.usdz": {
       "byteCount": 830433,
-      "sha256": "bbf2dfa7eff0525bd994a3a53ee5977493852490616b1ebc55ef8e00ab2c26f2"
+      "sha256": "1b5e84999465ef634df611009bdcd2848d9cf8f997cb34b7ae3bf96a35954ba7"
     }
   },
   "hoseRuntime": {
@@ -286,11 +286,8 @@
     }
   },
   "materialAssignments": {
-    "VAC_BUTTON_ACCENT_RING": [
-      "MAT_BRASS_ACCENT"
-    ],
     "VAC_BUTTON_BASE": [
-      "MAT_CHARCOAL_METAL"
+      "MAT_CHARCOAL_RUBBER"
     ],
     "VAC_BUTTON_CAP": [
       "MAT_BUTTON_RED"
@@ -301,14 +298,8 @@
     "VAC_HOSE_SKIN": [
       "MAT_PEARL_RIBBED"
     ],
-    "VAC_NOZZLE_CHEEK_L": [
-      "MAT_BRASS_ACCENT"
-    ],
-    "VAC_NOZZLE_CHEEK_R": [
-      "MAT_BRASS_ACCENT"
-    ],
     "VAC_NOZZLE_COLLAR": [
-      "MAT_CHARCOAL_METAL"
+      "MAT_CHARCOAL_RUBBER"
     ],
     "VAC_NOZZLE_GASKET": [
       "MAT_CHARCOAL_RUBBER"
@@ -325,9 +316,6 @@
     "VAC_PORT": [
       "MAT_PEARL_PLASTIC"
     ],
-    "VAC_PORT_ACCENT": [
-      "MAT_BRASS_ACCENT"
-    ],
     "VAC_PORT_SOCKET": [
       "MAT_MOUTH_DARK"
     ]
@@ -336,19 +324,12 @@
     "MAT_PEARL_PLASTIC",
     "MAT_PEARL_RIBBED",
     "MAT_CHARCOAL_RUBBER",
-    "MAT_CHARCOAL_METAL",
     "MAT_BUTTON_RED",
-    "MAT_BRASS_ACCENT",
     "MAT_MOUTH_DARK"
   ],
   "meshStats": {
-    "meshCount": 15,
+    "meshCount": 11,
     "perMesh": {
-      "VAC_BUTTON_ACCENT_RING": {
-        "polygons": 240,
-        "triangles": 480,
-        "vertices": 320
-      },
       "VAC_BUTTON_BASE": {
         "polygons": 1040,
         "triangles": 1920,
@@ -368,16 +349,6 @@
         "polygons": 8792,
         "triangles": 17528,
         "vertices": 8766
-      },
-      "VAC_NOZZLE_CHEEK_L": {
-        "polygons": 72,
-        "triangles": 96,
-        "vertices": 50
-      },
-      "VAC_NOZZLE_CHEEK_R": {
-        "polygons": 72,
-        "triangles": 96,
-        "vertices": 50
       },
       "VAC_NOZZLE_COLLAR": {
         "polygons": 192,
@@ -409,20 +380,15 @@
         "triangles": 1008,
         "vertices": 576
       },
-      "VAC_PORT_ACCENT": {
-        "polygons": 216,
-        "triangles": 432,
-        "vertices": 288
-      },
       "VAC_PORT_SOCKET": {
         "polygons": 448,
         "triangles": 832,
         "vertices": 449
       }
     },
-    "polygons": 14992,
-    "triangles": 29320,
-    "vertices": 15129
+    "polygons": 14392,
+    "triangles": 28216,
+    "vertices": 14421
   },
   "nominalDockTransform": {
     "rotationQuaternion": [
@@ -475,7 +441,7 @@
   "product": "Voice VAC",
   "reproducibility": {
     "mode": "semantic-contract-v1",
-    "sceneSemanticSHA256": "1de85d8cbfa0b2eb5f1d01fd73700bc73c8dc5b090780670899a5f5998832648",
+    "sceneSemanticSHA256": "649d99c847588614f4c2cbac7668cd2a704341f51c31673ce4344e3a06ad01f3",
     "statement": "Normalized scene semantics are reproducible; Blender and USD container bytes are not promised identical."
   },
   "runtimeNodes": [
@@ -754,8 +720,8 @@
     "weightedVertexCount": 8766
   },
   "sourceHashes": {
-    "build_voice_vac.py": "f89cb9660a5b817a28edb7d725e0c9481e8a4e4c1be855eab3fc894b450168e9",
-    "voice-vac-machine.blend": "6bf7b79bedc703234ff25a17f5a96ca3f56de9d2c34665c83c0acbacf988ad4a"
+    "build_voice_vac.py": "0001607b66a0644013254e3ac88ec21a80e3e220b9fd8d2307e040500e597441",
+    "voice-vac-machine.blend": "a279915a6273ac9e5551bb8b39d06ee4b6b5e34de40d1dc9c94c29b14226985c"
   },
   "units": {
     "linear": "meter",

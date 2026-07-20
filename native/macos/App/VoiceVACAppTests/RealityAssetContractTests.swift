@@ -72,6 +72,13 @@ final class RealityAssetContractTests: XCTestCase {
         XCTAssertEqual(contract.reproducibility.sceneSemanticSHA256.count, 64)
     }
 
+    func testBundledDeviceUsesVacuumMaterialsInsteadOfOrnamentalBrass() throws {
+        let contract = try loadContract()
+
+        XCTAssertFalse(contract.materials.contains("MAT_BRASS_ACCENT"))
+        XCTAssertFalse(contract.materials.contains { $0.localizedCaseInsensitiveContains("brass") })
+    }
+
     func testBundledUSDZIntegrityHierarchyAndStaticRestPose() async throws {
         let contract = try loadContract()
         let expectations: [String: Set<String>] = [

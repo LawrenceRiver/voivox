@@ -31,9 +31,7 @@ MATERIAL_NAMES = [
     "MAT_PEARL_PLASTIC",
     "MAT_PEARL_RIBBED",
     "MAT_CHARCOAL_RUBBER",
-    "MAT_CHARCOAL_METAL",
     "MAT_BUTTON_RED",
-    "MAT_BRASS_ACCENT",
     "MAT_MOUTH_DARK",
 ]
 RUNTIME_NODES = [
@@ -197,14 +195,6 @@ def build_materials() -> dict[str, bpy.types.Material]:
             coat_weight=0.08,
             handmade_bump=0.04,
         ),
-        "MAT_CHARCOAL_METAL": create_material(
-            "MAT_CHARCOAL_METAL",
-            (0.072, 0.067, 0.06, 1.0),
-            metallic=0.74,
-            roughness=0.22,
-            coat_weight=0.25,
-            coat_roughness=0.13,
-        ),
         "MAT_BUTTON_RED": create_material(
             "MAT_BUTTON_RED",
             (0.255, 0.004, 0.003, 1.0),
@@ -214,13 +204,6 @@ def build_materials() -> dict[str, bpy.types.Material]:
             coat_roughness=0.16,
             subsurface_weight=0.025,
             handmade_bump=0.028,
-        ),
-        "MAT_BRASS_ACCENT": create_material(
-            "MAT_BRASS_ACCENT",
-            (0.54, 0.305, 0.082, 1.0),
-            metallic=0.82,
-            roughness=0.21,
-            coat_weight=0.22,
         ),
         "MAT_MOUTH_DARK": create_material(
             "MAT_MOUTH_DARK",
@@ -501,18 +484,6 @@ def build_device(
     socket.location = (-0.132, -0.018, 0.002)
     parent(socket, device_root)
 
-    port_accent = lathe_mesh(
-        "VAC_PORT_ACCENT",
-        [(-0.020, 0.045), (-0.024, 0.049), (-0.028, 0.049), (-0.031, 0.045)],
-        materials["MAT_BRASS_ACCENT"],
-        collection,
-        segments=72,
-        cap_start=False,
-        cap_end=False,
-    )
-    port_accent.location = (-0.132, 0.006, 0.002)
-    parent(port_accent, device_root)
-
     nozzle = add_empty("VAC_NOZZLE", collection)
     nozzle.empty_display_type = "ARROWS"
     nozzle.location = DOCK_LOCATION
@@ -543,7 +514,7 @@ def build_device(
     throat_collar = lathe_mesh(
         "VAC_NOZZLE_COLLAR",
         [(0.010, 0.029), (0.004, 0.034), (-0.003, 0.035), (-0.010, 0.031)],
-        materials["MAT_CHARCOAL_METAL"],
+        materials["MAT_CHARCOAL_RUBBER"],
         collection,
         segments=64,
         radial_ripple=0.032,
@@ -588,25 +559,6 @@ def build_device(
     )
     parent(mouth, nozzle)
 
-    # Two authored cheek pads catch a small warm highlight at capsule scale.
-    for side in (-1.0, 1.0):
-        cheek = superellipse_loft(
-            f"VAC_NOZZLE_CHEEK_{'L' if side < 0 else 'R'}",
-            [
-                (-0.043, 0.009, 0.009, 3.6, side * 0.0),
-                (-0.067, 0.014, 0.007, 4.0, side * 0.0),
-            ],
-            materials["MAT_BRASS_ACCENT"],
-            collection,
-            segments=24,
-            cap_start=True,
-            cap_end=True,
-        )
-        cheek.scale.x = 0.65
-        cheek.location.x = side * 0.052
-        cheek.location.z = -0.018
-        parent(cheek, nozzle)
-
     button_base = lathe_mesh(
         "VAC_BUTTON_BASE",
         [
@@ -617,7 +569,7 @@ def build_device(
             (-0.018, 0.057),
             (-0.027, 0.048),
         ],
-        materials["MAT_CHARCOAL_METAL"],
+        materials["MAT_CHARCOAL_RUBBER"],
         collection,
         segments=80,
         radial_ripple=0.006,
@@ -626,18 +578,6 @@ def build_device(
     button_base.location = (0.128, 0.006, 0.002)
     parent(button_base, device_root)
     add_bevel(button_base, 0.0011, 3)
-
-    button_ring = lathe_mesh(
-        "VAC_BUTTON_ACCENT_RING",
-        [(-0.020, 0.043), (-0.025, 0.050), (-0.030, 0.050), (-0.034, 0.043)],
-        materials["MAT_BRASS_ACCENT"],
-        collection,
-        segments=80,
-        cap_start=False,
-        cap_end=False,
-    )
-    button_ring.location = (0.128, 0.006, 0.002)
-    parent(button_ring, device_root)
 
     button_cap = lathe_mesh(
         "VAC_BUTTON_CAP",
