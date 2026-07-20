@@ -3,18 +3,37 @@ import Foundation
 let VOIVOXNativeHostIdentity = "com.voivox.bridge"
 typealias NativeProofVerifier = (NativeConnection) -> Bool
 
+enum NativeHostRequest: Equatable {
+    case discover
+    case connect
+
+    static func parse(_ data: Data) throws -> NativeHostRequest {
+        guard
+            let object = try? JSONSerialization.jsonObject(with: data),
+            let dictionary = object as? [String: Any],
+            Set(dictionary.keys) == Set(["protocolVersion", "type"]),
+            let protocolVersion = dictionary["protocolVersion"] as? Int,
+            let type = dictionary["type"] as? String
+        else {
+            throw NativeHostError.unsupportedRequest
+        }
+        switch (protocolVersion, type) {
+        case (1, "discover"):
+            return .discover
+        case (2, "connect"):
+            return .connect
+        default:
+            throw NativeHostError.unsupportedRequest
+        }
+    }
+}
+
 struct NativeDiscoveryRequest: Equatable {
     let protocolVersion: Int
     let type: String
 
     static func parse(_ data: Data) throws -> NativeDiscoveryRequest {
-        guard
-            let object = try? JSONSerialization.jsonObject(with: data),
-            let dictionary = object as? [String: Any],
-            Set(dictionary.keys) == Set(["protocolVersion", "type"]),
-            dictionary["protocolVersion"] as? Int == 1,
-            dictionary["type"] as? String == "discover"
-        else {
+        guard try NativeHostRequest.parse(data) == .discover else {
             throw NativeHostError.unsupportedRequest
         }
         return NativeDiscoveryRequest(protocolVersion: 1, type: "discover")
@@ -52,7 +71,7 @@ struct NativeConnection: Equatable {
         return NativeConnection(baseUrl: baseUrl, token: token, localAsr: localAsr)
     }
 
-    private static func isExactLoopbackBaseUrl(_ value: String) -> Bool {
+    static func isExactLoopbackBaseUrl(_ value: String) -> Bool {
         let prefix = "http://127.0.0.1:"
         guard value.hasPrefix(prefix) else { return false }
         let portText = String(value.dropFirst(prefix.count))
@@ -137,11 +156,23 @@ enum NativeHostProcessor {
     }
 
     static func errorResponse(_ code: String) -> Data {
+        errorResponse(code, protocolVersion: 1)
+    }
+
+    static func errorResponse(_ code: String, protocolVersion: Int) -> Data {
         encode([
-            "protocolVersion": 1,
+            "protocolVersion": protocolVersion,
             "service": "voivox",
             "status": "error",
             "error": code
+        ])
+    }
+
+    static func connectedResponse() -> Data {
+        encode([
+            "protocolVersion": 2,
+            "service": "voivox",
+            "status": "connected"
         ])
     }
 
@@ -152,12 +183,25 @@ enum NativeHostProcessor {
 }
 
 enum NativeMessagingHost {
+    typealias RelayCommands = (
+        NativeConnection,
+        FileHandle,
+        @escaping () -> Bool
+    ) throws -> Void
+
     static func run(
         input: FileHandle = .standardInput,
         output: FileHandle = .standardOutput,
         loadConnection: () throws -> Data = NativeConnectionFile.load,
         verifyConnection: NativeProofVerifier = { connection in
             NativeServerProof.verify(connection)
+        },
+        relayCommands: RelayCommands = { connection, output, shouldStop in
+            try NativeCommandRelay().relay(
+                connection: connection,
+                output: output,
+                shouldStop: shouldStop
+            )
         }
     ) {
         while true {
@@ -165,14 +209,65 @@ enum NativeMessagingHost {
                 guard let request = try NativeMessageFraming.readMessage(from: input) else {
                     return
                 }
-                try NativeMessageFraming.writeMessage(
-                    NativeHostProcessor.response(
-                        for: request,
-                        loadConnection: loadConnection,
-                        verifyConnection: verifyConnection
-                    ),
-                    to: output
-                )
+                switch try NativeHostRequest.parse(request) {
+                case .discover:
+                    try NativeMessageFraming.writeMessage(
+                        NativeHostProcessor.response(
+                            for: request,
+                            loadConnection: loadConnection,
+                            verifyConnection: verifyConnection
+                        ),
+                        to: output
+                    )
+                case .connect:
+                    let connectionData: Data
+                    do {
+                        connectionData = try loadConnection()
+                    } catch {
+                        try NativeMessageFraming.writeMessage(
+                            NativeHostProcessor.errorResponse(
+                                "connection_unavailable",
+                                protocolVersion: 2
+                            ),
+                            to: output
+                        )
+                        return
+                    }
+                    let connection: NativeConnection
+                    do {
+                        connection = try NativeConnection.parse(connectionData)
+                    } catch {
+                        try NativeMessageFraming.writeMessage(
+                            NativeHostProcessor.errorResponse("invalid_connection", protocolVersion: 2),
+                            to: output
+                        )
+                        return
+                    }
+                    guard verifyConnection(connection) else {
+                        try NativeMessageFraming.writeMessage(
+                            NativeHostProcessor.errorResponse(
+                                "connection_unavailable",
+                                protocolVersion: 2
+                            ),
+                            to: output
+                        )
+                        return
+                    }
+                    try NativeMessageFraming.writeMessage(
+                        NativeHostProcessor.connectedResponse(),
+                        to: output
+                    )
+                    let lifetime = NativePortLifetime(input: input)
+                    lifetime.start()
+                    defer { lifetime.stop() }
+                    do {
+                        try relayCommands(connection, output) { lifetime.hasEnded }
+                    } catch {
+                        // A protocol-two relay failure closes the native port. Chrome
+                        // reconnects and re-verifies the current connection file.
+                    }
+                    return
+                }
             } catch {
                 try? NativeMessageFraming.writeMessage(
                     NativeHostProcessor.errorResponse("invalid_native_message"),
@@ -181,5 +276,47 @@ enum NativeMessagingHost {
                 return
             }
         }
+    }
+}
+
+final class NativePortLifetime: @unchecked Sendable {
+    private let input: FileHandle
+    private let lock = NSLock()
+    private var ended = false
+    private var notifications = 0
+
+    init(input: FileHandle) {
+        self.input = input
+    }
+
+    var hasEnded: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return ended
+    }
+
+    var notificationCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return notifications
+    }
+
+    func start() {
+        input.readabilityHandler = { [weak self] handle in
+            handle.readabilityHandler = nil
+            _ = handle.availableData
+            self?.markEnded()
+        }
+    }
+
+    func stop() {
+        input.readabilityHandler = nil
+    }
+
+    private func markEnded() {
+        lock.lock()
+        ended = true
+        notifications += 1
+        lock.unlock()
     }
 }
