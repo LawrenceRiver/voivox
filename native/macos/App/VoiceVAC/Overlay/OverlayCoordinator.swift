@@ -23,6 +23,11 @@ final class OverlayCoordinator: WindowCoordinating, VoiceVACInteractionPresentin
     private var panels: [PanelRole: any PanelControlling] = [:]
     private var currentLayout: OverlayLayout?
     private var dragContext: DragContext?
+    /// The nozzle owns a separate transparent macOS panel. Whether that panel
+    /// is mechanically parked on the capsule is visual state, not a proxy for
+    /// an ASR phase: warnings and transcript text can exist while the mouth is
+    /// still docked.
+    private var nozzleIsDocked = true
     private weak var store: VoiceVACStore?
     private(set) var auxiliaryPresentation = AuxiliaryPresentation.hidden
     private var isURLInputPresented = false
@@ -70,6 +75,7 @@ final class OverlayCoordinator: WindowCoordinating, VoiceVACInteractionPresentin
         showsCloseButton: Bool
     ) {
         guard let panel = panels[.nozzle] as? NozzleHitPanel else { return }
+        nozzleIsDocked = false
         panel.setDeployed(
             center: center,
             hoseTangent: hoseTangent,
@@ -81,6 +87,7 @@ final class OverlayCoordinator: WindowCoordinating, VoiceVACInteractionPresentin
         guard let frame = currentLayout?.nozzleHitFrame,
               let panel = panels[.nozzle] as? NozzleHitPanel
         else { return }
+        nozzleIsDocked = true
         panel.setDocked(frame: frame)
     }
 
@@ -202,21 +209,21 @@ final class OverlayCoordinator: WindowCoordinating, VoiceVACInteractionPresentin
 
     private func applyStaticFrames(from layout: OverlayLayout) {
         panels[.capsule]?.setFrame(layout.capsuleFrame)
-        if store?.state.phase == .idle || store == nil {
+        if nozzleIsDocked {
             if let panel = panels[.nozzle] as? NozzleHitPanel {
                 panel.setDocked(frame: layout.nozzleHitFrame)
             } else {
                 panels[.nozzle]?.setFrame(layout.nozzleHitFrame)
             }
+            interactionRuntime?.configureDock(frame: layout.nozzleHitFrame)
+            do {
+                try hoseRenderSession?.dock(in: layout.nozzleHitFrame)
+            } catch {
+                // HoseRenderSession has already surfaced this contract failure in every viewport.
+            }
         }
         panels[.transcript]?.setFrame(layout.transcriptFrame)
         panels[.urlInput]?.setFrame(layout.transcriptFrame)
-        interactionRuntime?.configureDock(frame: layout.nozzleHitFrame)
-        do {
-            try hoseRenderSession?.dock(in: layout.nozzleHitFrame)
-        } catch {
-            // HoseRenderSession has already surfaced this contract failure in every viewport.
-        }
     }
 
     private func rewriteCorrectedPlacementIfNeeded(

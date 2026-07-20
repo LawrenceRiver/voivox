@@ -282,6 +282,29 @@ final class ScreenReconcilerTests: XCTestCase {
         XCTAssertNotNil(store.load())
     }
 
+    func testDockedNozzleFollowsTheCapsuleEvenWhenTheStatusIsNotIdle() {
+        let main = screen(2)
+        let fixture = makeFixture(screens: [main], preferred: main.id)
+        // A message or yellow warning must not turn a still-docked nozzle into
+        // a detached desktop window. Attachment is a visual relationship, not
+        // an inference from the transcription state machine.
+        fixture.coordinator.start(with: VoiceVACStore(
+            state: VoiceVACState(phase: .warningYellow)
+        ))
+        let capsule = try! XCTUnwrap(fixture.factory.panel(for: .capsule))
+        let nozzle = try! XCTUnwrap(fixture.factory.panel(for: .nozzle))
+        let originalOffset = CGPoint(
+            x: nozzle.frame.minX - capsule.frame.minX,
+            y: nozzle.frame.minY - capsule.frame.minY
+        )
+
+        fixture.coordinator.beginCapsuleDrag(at: CGPoint(x: 1_200, y: 200))
+        fixture.coordinator.dragCapsule(to: CGPoint(x: 1_040, y: 310))
+
+        XCTAssertEqual(nozzle.frame.minX - capsule.frame.minX, originalOffset.x, accuracy: 0.001)
+        XCTAssertEqual(nozzle.frame.minY - capsule.frame.minY, originalOffset.y, accuracy: 0.001)
+    }
+
     func testFactoryInstalledDragHandlersRespectBackgroundHitTesting() {
         let defaults = CountingUserDefaults()
         let store = CapsulePlacementStore(defaults: defaults)
