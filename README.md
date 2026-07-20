@@ -15,12 +15,12 @@
   <img src="https://img.shields.io/badge/privacy-local--first-0B6B6B.svg" alt="Local first" />
 </p>
 
-Voice Vac captures only the source you choose, keeps the host muted, and transcribes with an open model on the device. The Chrome extension works by itself. The macOS App connects automatically when present, preserves a local transcript library, and packages a Codex MCP so an agent can read or transform the text without touching the immutable source.
+Voice Vac captures only the source you choose, keeps the host muted, and transcribes with an open model on the device. The Chrome extension is the capture surface; its local Qwen3-ASR relay is supplied by the Voice Vac App/bridge. The macOS App connects automatically when present, preserves a local transcript library, and packages a Codex MCP so an agent can read or transform the text without touching the immutable source.
 
 Voice Vac is the product name for the **Private Video Transcription Tunnel (PVTT)**: a D Channel between one playable browser video and speech recognition. It has two explicit processing modes:
 
 - **Live Tunnel** — `chrome.tabCapture` streams only the authorized tab into local ASR while the tab stays silent.
-- **Accelerated Decode** — when an ordinary, legally accessible media file or manifest can be read, FFmpeg extracts 16 kHz mono PCM, chunks are inferred in parallel, and the system falls back to Live Tunnel when the source is opaque, encrypted, or unavailable.
+- **Accelerated Decode** — FFmpeg demux/chunk/merge building blocks exist for ordinary, legally accessible media files. The active-video coordinator currently returns `ACCELERATED_SOURCE_UNAVAILABLE` until a source adapter is enabled; it never pretends that a hidden player is an accelerated decoder.
 
 The speed claim is measured with real-time factor (RTF), not promised universally. Downloads and optional timestamp alignment are reported separately from model inference.
 
@@ -30,7 +30,7 @@ The speed claim is measured with real-time factor (RTF), not promised universall
 
 ### Current architecture and delivery stage
 
-The current implementation is organized around one shared machine language across the App, Chrome Extension, and MCP Monitor. The diagram below separates the production path from the remaining manual hardware gate: the App UI and local bridge are validated, the MCP contract is ready, and Accelerated Decode is bounded to legally accessible media with automatic fallback to Live Tunnel.
+The current implementation is organized around one shared machine language across the App, Chrome Extension, and MCP Monitor. The diagram below separates the production path from the remaining manual hardware gate: the App UI and local bridge are validated, the MCP contract is ready, and Accelerated Decode is capability-gated to legally accessible media; Live Tunnel remains the verified path and explicit fallback.
 
 <p align="center">
   <img src="docs/assets/voice-vac-architecture.svg" width="100%" alt="Voice Vac architecture: Chrome tab to private audio tunnel, local ASR, transcript store, App, MCP Monitor, and Codex" />
@@ -40,8 +40,8 @@ The current implementation is organized around one shared machine language acros
 
 | Surface | What it does | Needs the App? |
 | --- | --- | --- |
-| Chrome Extension | One-click muted capture of the active tab; local Fast/Quality Whisper transcription; copy/retry; Chinese/English UI | No |
-| macOS App | Automatic extension bridge, durable local sessions, experimental selected-App capture, local capability status | — |
+| Chrome Extension | One-click muted capture of the active tab; PCM relay to local Qwen3-ASR; copy/retry; Chinese/English UI | No, when the native local bridge is installed |
+| macOS App | Automatic extension bridge, durable local sessions, local Qwen3-ASR runtime, experimental selected-App capture, local capability status | — |
 | Codex MCP | Returns the latest active-video transcript directly to Codex, plus sessions, exports, and derived text | Yes |
 
 No cloud speech API or API key is required. Voice Vac does not hook the keyboard, clipboard, microphone dictation channel, Doubao, WeChat, or the system input method.
@@ -64,11 +64,11 @@ The result includes `source_url`, `title`, `language`, `duration_seconds`, the s
   <a href="https://www.xiaohongshu.com/explore/699ee564000000001b01624a"><img src="docs/assets/voivox-case-abuse-mv.jpg" width="100%" alt="Frame from Lawrence River's Abuse music video used for Voice Vac local transcription verification" /></a>
 </p>
 
-The user's public Xiaohongshu MV has no native caption track, so Voice Vac extracted the first 30 seconds as 16 kHz mono audio and ran both pinned q8 models locally. Fast and Quality returned the same unedited text:
+The user's public Xiaohongshu MV has no native caption track, so Voice Vac extracted the first 30 seconds as 16 kHz mono audio and ran the pinned local Qwen3-ASR-0.6B service. Fast and Quality are processing-window presets, not separate cloud models, and returned the same unedited text:
 
 > According to authoritative experts, Lawrence River is in the spotlight because he is a virus.
 
-The visible opening card supports the final clause, but this is a smoke test—not a word-error-rate claim. The recorded run used **no speech API**: Fast was warm-cached; Quality downloaded its model once, then inference ran on the local CPU. Exact revisions, hashes, cache conditions, raw outputs, and timings are preserved in the [comparison record](docs/evidence/voivox-xhs-abuse-local-asr-comparison.md) and its linked JSON evidence.
+The visible opening card supports the final clause, but this is a smoke test—not a word-error-rate claim. The recorded run used **no speech API**; Qwen model setup and local CPU inference were measured separately. Exact revisions, hashes, cache conditions, raw outputs, and timings are preserved in the [comparison record](docs/evidence/voivox-xhs-abuse-local-asr-comparison.md) and its linked JSON evidence.
 
 <p align="center">
   <img src="docs/assets/voivox-app-abuse-session.jpg" width="100%" alt="Packaged Voice Vac macOS App showing the imported Abuse MV transcript and ready Codex MCP" />
@@ -82,7 +82,7 @@ The rebuilt packaged App then accepted that transcript through its restricted Ch
   <img src="docs/assets/voivox-live-tab-transcription.jpg" width="420" alt="Voice Vac Chrome extension showing a completed local transcription from a live Xiaohongshu tab" />
 </p>
 
-The unpacked extension was also invoked through the real Chrome UI against a playing Xiaohongshu video. It muted host playback, captured the tab audio, downloaded the pinned Quality model, ran q8 Whisper through bundled ONNX Runtime WASM, and displayed the completed raw text above. This acceptance run found and fixed two Chrome-only lifecycle bugs that unit mocks had missed. The [live tab-capture record](docs/evidence/voivox-live-tab-capture.md) documents the reproduction, fix, and limitations of this noisy music-video sample.
+The unpacked extension was also invoked through the real Chrome UI against a playing Xiaohongshu video. It muted host playback, captured only that tab's PCM stream, relayed it to the local Qwen3-ASR service, and displayed the completed raw text above. This acceptance run found and fixed Chrome-only lifecycle bugs that unit mocks had missed. The [live tab-capture record](docs/evidence/voivox-live-tab-capture.md) documents the reproduction, fix, and limitations of this noisy music-video sample.
 
 ## Judge / first-use path
 
@@ -91,7 +91,7 @@ Download the latest judge artifacts from [GitHub Releases](https://github.com/La
 1. Unzip `VoiceVac-Chrome-Extension-0.1.1.zip`.
 2. Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the unzipped folder.
 3. Pin Voice Vac, open a playing tab, choose **Fast** or **Quality**, and click the large capture button.
-4. Stop capture to get text. The first run downloads and caches the selected pinned model; transcription itself stays local.
+4. Stop capture to get text. The first run requires the local Qwen3-ASR runtime and model; audio stays inside the authenticated local relay.
 5. Optionally drag `Voice Vac.app` into `/Applications` and open it. The extension discovers it automatically—there is no address or token pairing screen.
 
 The current App candidate is ad-hoc signed for bundle integrity, but it is not Developer ID signed or notarized. macOS may require right-clicking it and choosing **Open** once. See the [release runbook](docs/release/RELEASE.md) for exact artifact and Gatekeeper notes.
@@ -100,10 +100,10 @@ The current App candidate is ad-hoc signed for bundle integrity, but it is not D
 
 | Mode | Pinned model | Approx. first download | Best for |
 | --- | --- | ---: | --- |
-| Fast | `onnx-community/whisper-tiny` q8 | 45 MB | quick drafts and shorter clips |
-| Quality | `onnx-community/whisper-base` q8 | 80 MB | better multilingual recognition |
+| Fast | `Qwen/Qwen3-ASR-0.6B` | local install | shorter relay windows and faster first text |
+| Quality | `Qwen/Qwen3-ASR-0.6B` | local install | longer relay windows and more context |
 
-Each model is pinned to an exact repository revision in source. Voice Vac deliberately runs the compact q8 models through bundled single-thread ONNX Runtime WASM; current Transformers.js guidance does not recommend q8 Whisper on WebGPU. A capture is limited to ten minutes; model memory is released after inactivity. During model download or transcription, the same main button cancels the work. Cancelled, failed, or timed-out audio remains only in extension memory for Retry and is cleared after success, a new capture, extension reload/update, or Chrome exit.
+The service pins the official Qwen3-ASR-0.6B revision and runs it through the bundled Python worker in offline mode. The extension does not ship a browser ASR runtime or download speech models. A capture is limited to ten minutes; during capture/transcription, the same main button cancels the work. Cancelled, failed, or timed-out audio remains only in the relay until the session is closed.
 
 ## Codex MCP
 
@@ -123,7 +123,7 @@ Open Voice Vac before using the tools. Useful first calls are:
 - `voivox_export_transcript`
 - `voivox_save_derived_text`
 
-Browser-local captures sync **completed text only** to the running App. Audio remains inside the extension. Codex can generate a summary, outline, translation, or cleanup as a derived result; it never overwrites timestamped raw text.
+Browser-tab captures sync **PCM through the authenticated local relay** to the running App; no cloud endpoint or clipboard hop is used. Codex can generate a summary, outline, translation, or cleanup as a derived result; it never overwrites timestamped raw text.
 
 For development instead of an installed App:
 
@@ -164,24 +164,23 @@ npm run build --workspace=@voivox/chrome-extension
 
 Load `apps/chrome-extension/dist` in Chrome. The stable extension key produces ID `pepfpbobjbjehhhcjiokmneclohlffno`, which is also the only extension origin accepted by the native host and restricted loopback routes.
 
-### Optional desktop ASR
+### Local Qwen ASR
 
-Chrome does not need the desktop Python runtime. The optional selected-macOS-App path currently uses `mlx-qwen3-asr` and is clearly labeled **Experimental** in the UI:
+The desktop service uses the pinned Qwen3-ASR-0.6B Python worker for browser-tab relay and the clearly labeled **Experimental** selected-macOS-App path:
 
 ```bash
 bash scripts/install-asr-runtime.sh
 ```
 
-This runtime is stored outside the repository and is not embedded in release artifacts. Until real capture, permissions, and non-empty text are confirmed on the target Mac, selected-App capture should not be presented as production-stable.
+The model is stored outside the repository and is not embedded in release artifacts. Until real capture, permissions, and non-empty text are confirmed on the target Mac, selected-App capture should not be presented as production-stable.
 
 ## Architecture and trust boundaries
 
 ```text
 User click
-  └─ Chrome tabCapture → zero-gain Web Audio graph → 16 kHz mono buffer
-       └─ bundled Transformers.js + WebGPU/WASM → browser-local text
-            └─ optional open App: completed text only (never audio)
-                 └─ exact-ID discovery + HMAC proof → local sessions.json → Codex MCP
+  └─ Chrome tabCapture → zero-gain Web Audio graph → 16 kHz mono PCM
+       └─ authenticated native relay → local Voice Vac App → Qwen3-ASR Python worker
+            └─ exact-ID discovery + HMAC proof → local sessions.json → Codex MCP
 
 Separate desktop feature
   └─ explicitly selected macOS App → experimental local Qwen ASR → local session
@@ -192,7 +191,7 @@ Security properties are tested rather than implied:
 - Native Messaging is restricted to the stable extension ID.
 - A fresh random challenge and HMAC bind discovery to the live server's exact `127.0.0.1` address; a stale crash file or relayed port cannot release the token.
 - The extension token can import only a completed browser transcript; it cannot accept audio, list/read sessions, use MCP routes, or access the App's primary token.
-- MV3 JavaScript, Worker code, AudioWorklet code, and WASM are packaged locally. Only pinned model **data** is downloaded.
+- MV3 JavaScript and AudioWorklet code are packaged locally. The extension sends PCM only to the authenticated local bridge; no speech API or browser model is used.
 - Capture start requires a user gesture, and the extension recovers from stale MV3/offscreen state.
 - Raw and derived text are stored separately.
 
@@ -201,17 +200,27 @@ Read [PRIVACY.md](PRIVACY.md), [SECURITY.md](SECURITY.md), and [THIRD_PARTY_NOTI
 ## Repository layout
 
 ```text
-apps/desktop           Electron desktop App and packaged MCP launcher
-apps/chrome-extension  Chrome MV3 popup, offscreen capture, local ASR Worker
+apps/desktop           Electron desktop App, headless local backend, and MCP launcher
+apps/chrome-extension  Chrome MV3 popup, offscreen capture, and authenticated PCM relay
 apps/mcp               stdio MCP server and local Voice Vac client
 packages/core          session model, persistence, authenticated loopback API
 packages/i18n          typed Chinese/English message catalog
-native/macos           selected-process host and Native Messaging verifier
-native/asr             optional desktop Python ASR worker
+native/macos           native capsule App, selected-process host, and Native Messaging verifier
+native/asr             pinned offline Qwen3-ASR Python worker
 docs                   design, hackathon, release, and visual assets
 ```
 
 ## Verification and packaging
+
+Build the distributable surfaces from the repository root:
+
+```bash
+npm run build:all
+npm run build:native
+npm run package:dir --workspace @voivox/desktop
+```
+
+`build:native` writes the small glass capsule to `native/macos/build/Voice VAC.app` and embeds the headless bridge plus Qwen worker. The native bundle resolves a local Node 22 runtime (or `VOICE_VAC_NODE`) to supervise that bridge; the Electron package includes its own Node runtime. No speech API key is required.
 
 ```bash
 npm test

@@ -96,6 +96,45 @@ describe('ExtensionCaptureController', () => {
     })).toThrow(/Chrome tab/i);
   });
 
+  it('condition-waits for the exact MCP job binding without selecting another capture', async () => {
+    const { controller, tunnelId } = readyController();
+    const waiting = controller.waitForJob('job-exact', 100);
+
+    const unrelated = controller.startCapture({
+      jobId: 'job-other',
+      mode: 'quality',
+      source: {
+        kind: 'chrome-tab',
+        label: 'Target MV',
+        url: 'https://example.test/mv'
+      },
+      tunnelSessionId: tunnelId
+    });
+    expect(controller.getBindingForJob('job-exact')).toBeUndefined();
+    expect(controller.getBindingForJob('job-other')?.captureSessionId).toBe(unrelated.id);
+
+    // The service enforces one active capture, so finish the unrelated one before
+    // registering the exact job that the waiter must resolve with.
+    controller.ingestAudio(unrelated.id, 0, new Uint8Array([0, 0]));
+    await controller.stopCapture(unrelated.id);
+    const exact = controller.startCapture({
+      jobId: 'job-exact',
+      mode: 'fast',
+      source: {
+        kind: 'chrome-tab',
+        label: 'Target MV',
+        url: 'https://example.test/mv'
+      },
+      tunnelSessionId: tunnelId
+    });
+
+    await expect(waiting).resolves.toMatchObject({
+      captureSessionId: exact.id,
+      jobId: 'job-exact'
+    });
+    await expect(controller.waitForJob('job-missing', 1)).resolves.toBeUndefined();
+  });
+
   it('requires an exact canonical HTTP URL on both the ready tunnel and capture source', () => {
     const service = new VoivoxService();
     const tunnels = new CrossWindowSessionStore();

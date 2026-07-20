@@ -3,7 +3,7 @@ import Observation
 import VoiceVACCore
 
 @MainActor
-final class OverlayCoordinator: WindowCoordinating {
+final class OverlayCoordinator: WindowCoordinating, VoiceVACInteractionPresenting {
     enum AuxiliaryPresentation: Equatable {
         case hidden
         case transcript
@@ -26,19 +26,24 @@ final class OverlayCoordinator: WindowCoordinating {
     private weak var store: VoiceVACStore?
     private(set) var auxiliaryPresentation = AuxiliaryPresentation.hidden
     private var isURLInputPresented = false
+    private(set) var interactionRuntime: VoiceVACInteractionRuntime?
 
     init(
         screenProvider: any ScreenProviding,
         panelFactory: any PanelFactory,
         layoutEngine: OverlayLayoutEngine,
         placementStore: CapsulePlacementStore,
-        hoseRenderSession: HoseRenderSession? = nil
+        hoseRenderSession: HoseRenderSession? = nil,
+        interactionRuntime: VoiceVACInteractionRuntime? = nil
     ) {
         self.screenProvider = screenProvider
         self.panelFactory = panelFactory
         self.layoutEngine = layoutEngine
         self.placementStore = placementStore
         self.hoseRenderSession = hoseRenderSession
+        self.interactionRuntime = interactionRuntime
+            ?? (panelFactory as? LivePanelFactory)?.interactionRuntime
+        self.interactionRuntime?.presenter = self
     }
 
     func start(with store: VoiceVACStore) {
@@ -53,6 +58,30 @@ final class OverlayCoordinator: WindowCoordinating {
     func setURLInputPresented(_ isPresented: Bool) {
         isURLInputPresented = isPresented
         synchronizePanelVisibility()
+    }
+
+    func panel(for role: PanelRole) -> (any PanelControlling)? {
+        panels[role]
+    }
+
+    func moveNozzlePanel(
+        center: CGPoint,
+        hoseTangent: CGVector,
+        showsCloseButton: Bool
+    ) {
+        guard let panel = panels[.nozzle] as? NozzleHitPanel else { return }
+        panel.setDeployed(
+            center: center,
+            hoseTangent: hoseTangent,
+            showsCloseButton: showsCloseButton
+        )
+    }
+
+    func dockNozzlePanel() {
+        guard let frame = currentLayout?.nozzleHitFrame,
+              let panel = panels[.nozzle] as? NozzleHitPanel
+        else { return }
+        panel.setDocked(frame: frame)
     }
 
     func beginCapsuleDrag(at globalPoint: CGPoint) {
@@ -173,9 +202,16 @@ final class OverlayCoordinator: WindowCoordinating {
 
     private func applyStaticFrames(from layout: OverlayLayout) {
         panels[.capsule]?.setFrame(layout.capsuleFrame)
-        panels[.nozzle]?.setFrame(layout.nozzleHitFrame)
+        if store?.state.phase == .idle || store == nil {
+            if let panel = panels[.nozzle] as? NozzleHitPanel {
+                panel.setDocked(frame: layout.nozzleHitFrame)
+            } else {
+                panels[.nozzle]?.setFrame(layout.nozzleHitFrame)
+            }
+        }
         panels[.transcript]?.setFrame(layout.transcriptFrame)
         panels[.urlInput]?.setFrame(layout.transcriptFrame)
+        interactionRuntime?.configureDock(frame: layout.nozzleHitFrame)
         do {
             try hoseRenderSession?.dock(in: layout.nozzleHitFrame)
         } catch {
@@ -219,7 +255,12 @@ final class OverlayCoordinator: WindowCoordinating {
             return .urlInput
         }
         guard let state = store?.state else { return .hidden }
-        if state.phase == .transcribing || !state.transcriptPreview.isEmpty {
+        if state.phase == .transcribing
+            || state.phase == .paused
+            || state.phase == .completed
+            || state.phase == .warningYellow
+            || !state.transcriptPreview.isEmpty
+        {
             return .transcript
         }
         return .hidden
@@ -243,6 +284,7 @@ final class OverlayCoordinator: WindowCoordinating {
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                self.interactionRuntime?.synchronize(with: store.state)
                 self.synchronizePanelVisibility()
                 self.observeStoreState()
             }

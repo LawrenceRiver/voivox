@@ -60,10 +60,14 @@ export class VoivoxClient {
   }
 
   async transcribeActiveVideo(options: ActiveVideoTranscriptionOptions): Promise<TranscriptResult> {
-    return this.requestJson('/v1/transcriptions/active-video', {
-      body: JSON.stringify(options),
-      method: 'POST'
-    });
+    return this.requestJson(
+      '/v1/transcriptions/active-video',
+      {
+        body: JSON.stringify(options),
+        method: 'POST'
+      },
+      this.captureStopTimeoutMs
+    );
   }
 
   async getLatestTranscript(): Promise<TranscriptResult> {

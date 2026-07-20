@@ -1,3 +1,7 @@
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it, vi } from 'vitest';
 
 type RemoveMcpConnectionFileBestEffort = (
@@ -8,16 +12,23 @@ type RemoveMcpConnectionFileBestEffort = (
   }
 ) => Promise<void>;
 
-async function loadRemoveHelper(): Promise<RemoveMcpConnectionFileBestEffort | undefined> {
+type WriteMcpConnectionFile = (
+  directory: string,
+  baseUrl: string,
+  token: string
+) => Promise<string>;
+
+async function loadMcpConnectionModule(): Promise<{
+  removeMcpConnectionFileBestEffort?: RemoveMcpConnectionFileBestEffort;
+  writeMcpConnectionFile?: WriteMcpConnectionFile;
+}> {
   const moduleUrl = new URL('../src/main/mcp-connection.ts', import.meta.url).href;
-  const module = await import(/* @vite-ignore */ moduleUrl).catch(() => ({}));
-  return (module as { removeMcpConnectionFileBestEffort?: RemoveMcpConnectionFileBestEffort })
-    .removeMcpConnectionFileBestEffort;
+  return import(/* @vite-ignore */ moduleUrl).catch(() => ({}));
 }
 
 describe('MCP connection-file cleanup', () => {
   it('awaits removal before shutdown cleanup resolves', async () => {
-    const removeMcpConnectionFileBestEffort = await loadRemoveHelper();
+    const { removeMcpConnectionFileBestEffort } = await loadMcpConnectionModule();
     expect(removeMcpConnectionFileBestEffort).toBeTypeOf('function');
     let releaseRemoval: (() => void) | undefined;
     const remove = vi.fn(() => new Promise<void>((resolve) => {
@@ -39,7 +50,7 @@ describe('MCP connection-file cleanup', () => {
   });
 
   it('does not block shutdown when removal fails', async () => {
-    const removeMcpConnectionFileBestEffort = await loadRemoveHelper();
+    const { removeMcpConnectionFileBestEffort } = await loadMcpConnectionModule();
     expect(removeMcpConnectionFileBestEffort).toBeTypeOf('function');
     const error = new Error('simulated read-only file');
     const onError = vi.fn();
@@ -49,5 +60,27 @@ describe('MCP connection-file cleanup', () => {
       remove: vi.fn().mockRejectedValue(error)
     })).resolves.toBeUndefined();
     expect(onError).toHaveBeenCalledWith(error);
+  });
+
+  it('writes the exact MCP connection atomically with owner-only permissions', async () => {
+    const { writeMcpConnectionFile } = await loadMcpConnectionModule();
+    expect(writeMcpConnectionFile).toBeTypeOf('function');
+    const directory = await mkdtemp(join(tmpdir(), 'voice-vac-mcp-'));
+    try {
+      const filePath = await writeMcpConnectionFile?.(
+        directory,
+        'http://127.0.0.1:43817',
+        'primary-token'
+      );
+
+      expect(filePath).toBe(join(directory, 'mcp-connection.json'));
+      expect(JSON.parse(await readFile(filePath!, 'utf8'))).toEqual({
+        baseUrl: 'http://127.0.0.1:43817',
+        token: 'primary-token'
+      });
+      expect((await stat(filePath!)).mode & 0o777).toBe(0o600);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
   });
 });

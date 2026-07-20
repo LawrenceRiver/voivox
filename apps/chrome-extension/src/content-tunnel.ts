@@ -102,8 +102,17 @@ export type MountedContentTunnel = {
   configure: (session: TargetSession) => void;
   beginDrag: (identity: DragIdentity) => boolean;
   cancelDrag: (sessionId?: string) => boolean;
+  play: (sessionId: string, targetId: string) => Promise<ContentPlaybackResult>;
+  pause: (sessionId: string, targetId: string) => boolean;
+  promptForPlayback: (sessionId: string, targetId: string) => boolean;
+  disposePlayback: (sessionId: string, targetId: string) => boolean;
   destroy: () => void;
 };
+
+type ContentPlaybackResult =
+  | { status: 'playing' }
+  | { status: 'user-play-required'; code: 'USER_PLAY_REQUIRED' }
+  | { status: 'failed'; code: 'NO_PLAYABLE_MEDIA' | 'TARGET_NAVIGATED' };
 
 const mountedByDocument = new WeakMap<Document, MountedContentTunnel>();
 
@@ -155,6 +164,8 @@ export function mountContentTunnel(
   let candidate: ResolvedElementTarget | undefined;
   let attached: ResolvedElementTarget | undefined;
   let prompt: HTMLButtonElement | undefined;
+  let attachedEndedListener: (() => void) | undefined;
+  let trustedPlaybackListener: ((event: Event) => void) | undefined;
   let destroyed = false;
   let generation = 0;
   let dropPending = false;
@@ -293,10 +304,18 @@ export function mountContentTunnel(
   const removePrompt = (): void => {
     prompt?.remove();
     prompt = undefined;
+    if (trustedPlaybackListener) {
+      doc.removeEventListener('click', trustedPlaybackListener, true);
+      trustedPlaybackListener = undefined;
+    }
   };
 
   const clearAttached = (): void => {
     removePrompt();
+    if (attached?.element instanceof HTMLMediaElement && attachedEndedListener) {
+      attached.element.removeEventListener('ended', attachedEndedListener);
+    }
+    attachedEndedListener = undefined;
     undecorate(attached);
     attached = undefined;
   };
@@ -332,29 +351,86 @@ export function mountContentTunnel(
     url: win.location.href
   });
 
-  const showPlayPrompt = (target: VideoTarget): void => {
+  const showPlayPrompt = (target: VideoTarget, awaitTrustedClick = false): void => {
     removePrompt();
-    if (target.canDirectPlay) return;
     const button = doc.createElement('button');
     button.type = 'button';
     button.className = 'voice-vac-play-prompt';
     button.dataset.voiceVacOverlay = 'true';
+    button.tabIndex = -1;
     button.textContent = 'Press play once in Chrome.';
     Object.assign(button.style, promptPosition(target.viewportRect), {
-      pointerEvents: 'auto',
+      pointerEvents: 'none',
       position: 'fixed',
       zIndex: '2147483647'
     });
-    button.addEventListener('click', (event) => {
-      if (!isTrustedEvent(event) || !session || attached?.target.id !== target.id) return;
-      publishBestEffort({
-        target: 'service-worker',
-        type: 'playback:user-started',
-        sessionId: session.id
-      });
-    });
+    if (awaitTrustedClick) {
+      trustedPlaybackListener = (event: Event) => {
+        if (!isTrustedEvent(event) || !session || attached?.target.id !== target.id) return;
+        const activeSessionId = session.id;
+        removePrompt();
+        publishBestEffort({
+          target: 'service-worker',
+          type: 'playback:user-started',
+          sessionId: activeSessionId
+        });
+      };
+      doc.addEventListener('click', trustedPlaybackListener, true);
+    }
     host.append(button);
     prompt = button;
+  };
+
+  const isExactAttachedTarget = (sessionId: string, targetId: string): boolean => (
+    !destroyed
+    && session?.id === sessionId
+    && attached?.target.id === targetId
+    && attached.target.documentId === session.documentId
+    && attached.target.frameId === session.frameId
+  );
+
+  const playAttached = async (
+    sessionId: string,
+    targetId: string
+  ): Promise<ContentPlaybackResult> => {
+    if (!isExactAttachedTarget(sessionId, targetId)) {
+      return { status: 'failed', code: 'TARGET_NAVIGATED' };
+    }
+    const media = attached?.element;
+    if (!(media instanceof HTMLMediaElement)) {
+      showPlayPrompt(attached!.target, true);
+      return { status: 'user-play-required', code: 'USER_PLAY_REQUIRED' };
+    }
+    try {
+      await media.play();
+      removePrompt();
+      return { status: 'playing' };
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'NotAllowedError') {
+        showPlayPrompt(attached!.target, true);
+        return { status: 'user-play-required', code: 'USER_PLAY_REQUIRED' };
+      }
+      return { status: 'failed', code: 'NO_PLAYABLE_MEDIA' };
+    }
+  };
+
+  const pauseAttached = (sessionId: string, targetId: string): boolean => {
+    if (!isExactAttachedTarget(sessionId, targetId)) return false;
+    const media = attached?.element;
+    if (media instanceof HTMLMediaElement) media.pause();
+    return true;
+  };
+
+  const promptForPlayback = (sessionId: string, targetId: string): boolean => {
+    if (!isExactAttachedTarget(sessionId, targetId)) return false;
+    showPlayPrompt(attached!.target, true);
+    return true;
+  };
+
+  const disposePlayback = (sessionId: string, targetId: string): boolean => {
+    if (!isExactAttachedTarget(sessionId, targetId)) return false;
+    removePrompt();
+    return true;
   };
 
   const onDragOver = (event: DragEvent): void => {
@@ -422,10 +498,23 @@ export function mountContentTunnel(
       clearAttached();
       attached = resolved;
       decorate(resolved);
+      if (resolved.element instanceof HTMLMediaElement) {
+        const attachedSessionId = active.id;
+        const attachedTargetId = resolved.target.id;
+        attachedEndedListener = () => {
+          publishBestEffort({
+            target: 'service-worker',
+            type: 'playback:ended',
+            sessionId: attachedSessionId,
+            targetId: attachedTargetId
+          });
+        };
+        resolved.element.addEventListener('ended', attachedEndedListener, { once: true });
+      }
       dragSession = undefined;
       setCatcherActive(false);
       setTunnelState('ready');
-      showPlayPrompt(resolved.target);
+      if (!resolved.target.canDirectPlay) showPlayPrompt(resolved.target);
     });
   };
 
@@ -480,6 +569,10 @@ export function mountContentTunnel(
       setTunnelState('armed');
       return true;
     },
+    play: playAttached,
+    pause: pauseAttached,
+    promptForPlayback,
+    disposePlayback,
     destroy: () => {
       if (destroyed) return;
       destroyed = true;
@@ -558,6 +651,31 @@ export function registerContentTunnelRuntime(
         activeSessionId = undefined;
       }
       sendResponse({ ok });
+      return;
+    }
+    if (message.target !== 'content-tunnel'
+      || typeof message.sessionId !== 'string'
+      || typeof message.targetId !== 'string') {
+      return;
+    }
+    if (message.type === 'playback:play') {
+      if (!mounted) {
+        sendResponse({ status: 'failed', code: 'TARGET_NAVIGATED' });
+        return;
+      }
+      void mounted.play(message.sessionId, message.targetId).then(sendResponse);
+      return true;
+    }
+    if (message.type === 'playback:pause') {
+      sendResponse({ ok: mounted?.pause(message.sessionId, message.targetId) ?? false });
+      return;
+    }
+    if (message.type === 'playback:prompt') {
+      sendResponse({ ok: mounted?.promptForPlayback(message.sessionId, message.targetId) ?? false });
+      return;
+    }
+    if (message.type === 'playback:dispose') {
+      sendResponse({ ok: mounted?.disposePlayback(message.sessionId, message.targetId) ?? false });
     }
   });
 }

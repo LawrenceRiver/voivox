@@ -3,8 +3,21 @@ import AppKit
 @MainActor
 final class CapsulePanel: NSPanel, PanelControlling {
     let role = PanelRole.capsule
+    let glass: CapsuleGlassView
 
-    init(frame: CGRect, dragHandlers: CapsuleDragHandlers? = nil) {
+    init(
+        frame: CGRect,
+        dragHandlers: CapsuleDragHandlers? = nil,
+        store: VoiceVACStore = VoiceVACStore(),
+        deviceController: VoiceVACDeviceInteractionController = VoiceVACDeviceInteractionController(),
+        interactionRuntime: VoiceVACInteractionRuntime? = nil
+    ) {
+        glass = CapsuleGlassView(
+            frame: CGRect(origin: .zero, size: frame.size),
+            store: store,
+            deviceController: deviceController,
+            interactionRuntime: interactionRuntime
+        )
         super.init(
             contentRect: frame,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -13,7 +26,6 @@ final class CapsulePanel: NSPanel, PanelControlling {
         )
         configureVoiceVACPanel(self, role: role)
 
-        let glass = CapsuleGlassView(frame: CGRect(origin: .zero, size: frame.size))
         glass.dragSurface.handlers = dragHandlers
         contentView = glass
     }

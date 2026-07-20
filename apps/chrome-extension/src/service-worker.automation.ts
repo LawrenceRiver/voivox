@@ -1,4 +1,7 @@
 import { createServiceWorkerRuntime } from './service-worker-core.js';
+import { CdpPlaybackDriver } from './automation/cdp-playback-driver.js';
 
-// Task 9 replaces this placeholder with the injected Automation playback driver.
-createServiceWorkerRuntime({ channel: 'automation' });
+createServiceWorkerRuntime({
+  channel: 'automation',
+  createPlaybackDriver: () => new CdpPlaybackDriver()
+});

@@ -30,11 +30,18 @@ public struct OverlayLayoutEngine: Sendable {
         )
         let capsuleFrame = CGRect(origin: capsuleOrigin, size: metrics.capsuleSize)
 
-        let nozzleHitFrame = CGRect(
-            x: capsuleFrame.minX + (capsuleFrame.height - metrics.nozzleHitSize.width) / 2,
-            y: capsuleFrame.midY - metrics.nozzleHitSize.height / 2,
-            width: metrics.nozzleHitSize.width,
-            height: metrics.nozzleHitSize.height
+        let controlProjection: DeviceControlProjection
+        do {
+            controlProjection = try VoiceVACDevicePresentationDesign.makeControlProjection(
+                viewport: metrics.capsuleSize,
+                hitTargetSize: metrics.nozzleHitSize
+            )
+        } catch {
+            preconditionFailure("Invalid Voice VAC control projection: \(error)")
+        }
+        let nozzleHitFrame = controlProjection.portHitFrame.offsetBy(
+            dx: capsuleFrame.minX,
+            dy: capsuleFrame.minY
         )
         let transcriptFrame = makeTranscriptFrame(
             capsuleFrame: capsuleFrame,

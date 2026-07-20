@@ -13,7 +13,7 @@ describe('capture presentation', () => {
     ).toEqual({
       actionLabel: '在 Chrome 扩展中开始',
       canChangeSource: true,
-      notice: '扩展始终在浏览器本地转写；App 打开时只自动保存完成的文字。',
+      notice: '扩展只把目标标签页的音频送入本机 Voice VAC App，再由 Qwen3-ASR 转写。',
       statusLabel: '准备就绪'
     });
   });
@@ -27,7 +27,7 @@ describe('capture presentation', () => {
       }, 'en')
     ).toMatchObject({
       actionLabel: 'Start in the Chrome extension',
-      notice: 'The extension always transcribes in the browser. When the App is open, only completed text is saved automatically.',
+      notice: 'The extension sends only the target tab audio to the local Voice VAC App for Qwen3-ASR transcription.',
       statusLabel: 'Ready'
     });
   });

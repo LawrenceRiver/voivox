@@ -284,12 +284,11 @@ export async function createVoivoxLoopbackServer(options: {
           sendJson(response, 400, { error: 'A valid Voice Vac active-video transcription request is required.' });
           return;
         }
-        const result = await (options.onActiveVideoTranscription?.(body)
-          ?? Promise.resolve(service.getLatestBrowserTranscript()));
+        const result = await options.onActiveVideoTranscription?.(body);
         if (!result) {
           sendJson(response, 409, {
             code: 'PVTT_NO_ACTIVE_VIDEO',
-            error: 'No completed browser video is registered. Start Voice Vac on the target tab, then try again.'
+            error: 'No active armed browser video is available. Connect Voice VAC to the target tab, then try again.'
           });
           return;
         }

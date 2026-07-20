@@ -230,6 +230,36 @@ describe('VoivoxService', () => {
     });
   });
 
+  it('returns a structured transcript for one exact completed browser session', () => {
+    const service = new VoivoxService();
+    const first = service.importCompletedCapture(
+      {
+        kind: 'chrome-tab',
+        label: 'Exact target',
+        language: 'zh',
+        title: 'Exact title',
+        url: 'https://example.com/exact'
+      },
+      [{ startMs: 0, endMs: 2_500, text: '精确的转写。' }]
+    );
+    service.importCompletedCapture(
+      { kind: 'chrome-tab', label: 'Newer unrelated tab' },
+      [{ startMs: 0, endMs: 1_000, text: '不应返回的文字。' }]
+    );
+
+    expect(service.getBrowserTranscript(first.id)).toMatchObject({
+      source_url: 'https://example.com/exact',
+      title: 'Exact title',
+      language: 'zh',
+      transcript: '精确的转写。',
+      duration_seconds: 2.5
+    });
+    expect(service.getBrowserTranscript('session_404')).toBeUndefined();
+
+    const active = service.startCapture({ kind: 'chrome-tab', label: 'Still running' });
+    expect(service.getBrowserTranscript(active.id)).toBeUndefined();
+  });
+
   it('rejects an empty browser-local transcript import', () => {
     const service = new VoivoxService();
 

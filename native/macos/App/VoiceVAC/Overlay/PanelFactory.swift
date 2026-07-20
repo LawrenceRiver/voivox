@@ -12,9 +12,27 @@ protocol PanelFactory: AnyObject {
 @MainActor
 final class LivePanelFactory: PanelFactory {
     private let hoseRenderSource: HoseRenderSnapshotSource
+    let store: VoiceVACStore
+    let deviceController: VoiceVACDeviceInteractionController
+    let interactionRuntime: VoiceVACInteractionRuntime
 
-    init(hoseRenderSource: HoseRenderSnapshotSource = HoseRenderSnapshotSource()) {
+    init(
+        hoseRenderSource: HoseRenderSnapshotSource = HoseRenderSnapshotSource(),
+        store: VoiceVACStore? = nil,
+        deviceController: VoiceVACDeviceInteractionController? = nil,
+        interactionRuntime: VoiceVACInteractionRuntime? = nil
+    ) {
+        let resolvedStore = store ?? VoiceVACStore()
+        let resolvedDevice = deviceController ?? VoiceVACDeviceInteractionController()
         self.hoseRenderSource = hoseRenderSource
+        self.store = resolvedStore
+        self.deviceController = resolvedDevice
+        self.interactionRuntime = interactionRuntime ?? VoiceVACInteractionRuntime(
+            store: resolvedStore,
+            hoseSession: nil,
+            deviceController: resolvedDevice,
+            sessionTokenProvider: UnavailableCrossWindowSessionTokenProvider()
+        )
     }
 
     func makePanel(
@@ -30,13 +48,28 @@ final class LivePanelFactory: PanelFactory {
                 renderSource: hoseRenderSource
             )
         case .capsule:
-            CapsulePanel(frame: frame, dragHandlers: capsuleDragHandlers)
+            CapsulePanel(
+                frame: frame,
+                dragHandlers: capsuleDragHandlers,
+                store: store,
+                deviceController: deviceController,
+                interactionRuntime: interactionRuntime
+            )
         case .nozzle:
-            NozzleHitPanel(frame: frame)
+            NozzleHitPanel(
+                frame: frame,
+                deviceController: deviceController,
+                interactionRuntime: interactionRuntime
+            )
         case .transcript:
-            TranscriptPanel(frame: frame)
+            TranscriptPanel(frame: frame, store: store)
         case .urlInput:
-            URLInputPanel(frame: frame)
+            URLInputPanel(
+                frame: frame,
+                onSubmit: { [weak interactionRuntime] url in
+                    interactionRuntime?.submitURL(url)
+                }
+            )
         }
     }
 }

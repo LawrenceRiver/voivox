@@ -6,11 +6,13 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 
 import {
   createVoivoxLoopbackServer,
+  ExtensionCommandBroker,
   JsonSessionStore,
   VoivoxService,
   type VoivoxCapabilities
 } from '@voivox/core';
 import { BufferedAsrPipeline } from '../src/main/asr-pipeline.js';
+import { ActiveVideoCoordinator } from '../src/main/active-video-coordinator.js';
 import { DesktopRuntime } from '../src/main/desktop-runtime.js';
 import { ExtensionCaptureController } from '../src/main/extension-capture-controller.js';
 import { startLocalAsrCapabilityProbe } from '../src/main/local-asr-capability.js';
@@ -69,6 +71,13 @@ async function bootstrap(): Promise<void> {
     service: runtime.getService(),
     tunnelSessions: runtime.getTunnelSessions()
   });
+  const extensionCommands = new ExtensionCommandBroker();
+  const activeVideoCoordinator = new ActiveVideoCoordinator({
+    extensionCaptureController,
+    extensionCommands,
+    service: runtime.getService(),
+    tunnelSessions: runtime.getTunnelSessions()
+  });
   const processTapHost = new MacProcessTapHost(
     resolveBundledResource('voivox-host', {
       isPackaged: app.isPackaged,
@@ -117,6 +126,8 @@ async function bootstrap(): Promise<void> {
         localAsr: localAsrProbe.getStatus()
       }),
       extensionCaptureController,
+      extensionCommands,
+      onActiveVideoTranscription: (request) => activeVideoCoordinator.transcribe(request),
       service: runtime.getService(),
       tunnelSessions: runtime.getTunnelSessions(),
       listMacProcesses: () => processTapHost.listProcesses(),

@@ -13,6 +13,7 @@ import type { BufferedAudioChunk } from './asr-pipeline.js';
 
 const MAXIMUM_PCM_CHUNK_BYTES = 128 * 1024;
 const MAXIMUM_TRANSCRIPT_WAIT_MS = 25_000;
+const MAXIMUM_JOB_WAIT_MS = 30_000;
 const MAXIMUM_RETAINED_TERMINAL_BINDINGS = 32;
 
 export type ExtensionCaptureStartRequest = CoreExtensionCaptureStartRequest;
@@ -52,8 +53,16 @@ type MutableBinding = {
   tunnelSessionId: string;
 };
 
+type JobWaiter = {
+  timer: ReturnType<typeof setTimeout>;
+  resolve: (binding: ExtensionCaptureBinding | undefined) => void;
+  signal?: AbortSignal;
+  abort?: () => void;
+};
+
 export class ExtensionCaptureController {
   private readonly bindings = new Map<string, MutableBinding>();
+  private readonly jobWaiters = new Map<string, Set<JobWaiter>>();
   private readonly pipeline: ExtensionPcmPipeline;
   private readonly service: VoivoxService;
   private readonly terminalBindingIds: string[] = [];
@@ -112,6 +121,7 @@ export class ExtensionCaptureController {
       terminal: false,
       tunnelSessionId: request.tunnelSessionId
     });
+    if (request.jobId) this.resolveJobWaiters(request.jobId);
     return session;
   }
 
@@ -127,6 +137,49 @@ export class ExtensionCaptureController {
     if (!binding) return undefined;
     this.synchronizeServiceTerminal(binding);
     return this.bindings.has(sessionId) ? copyBinding(binding) : undefined;
+  }
+
+  getBindingForJob(jobId: string): ExtensionCaptureBinding | undefined {
+    assertJobId(jobId);
+    const binding = [...this.bindings.values()]
+      .reverse()
+      .find((candidate) => candidate.jobId === jobId);
+    if (!binding) return undefined;
+    this.synchronizeServiceTerminal(binding);
+    return this.bindings.has(binding.captureSessionId) ? copyBinding(binding) : undefined;
+  }
+
+  waitForJob(
+    jobId: string,
+    waitMs: number,
+    signal?: AbortSignal
+  ): Promise<ExtensionCaptureBinding | undefined> {
+    assertJobId(jobId);
+    if (!Number.isSafeInteger(waitMs) || waitMs < 0 || waitMs > MAXIMUM_JOB_WAIT_MS) {
+      throw new Error('Extension capture job wait must be between 0 and 30000 ms.');
+    }
+    const immediate = this.getBindingForJob(jobId);
+    if (immediate || waitMs === 0 || signal?.aborted) return Promise.resolve(immediate);
+
+    return new Promise((resolve) => {
+      const waiter: JobWaiter = {
+        resolve,
+        timer: setTimeout(() => this.settleJobWaiter(jobId, waiter), waitMs),
+        ...(signal ? { signal } : {})
+      };
+      if (signal) {
+        waiter.abort = () => this.settleJobWaiter(jobId, waiter);
+        signal.addEventListener('abort', waiter.abort, { once: true });
+      }
+      const waiters = this.jobWaiters.get(jobId) ?? new Set<JobWaiter>();
+      waiters.add(waiter);
+      this.jobWaiters.set(jobId, waiters);
+      if (signal?.aborted) this.settleJobWaiter(jobId, waiter);
+      else {
+        const afterRegistration = this.getBindingForJob(jobId);
+        if (afterRegistration) this.resolveJobWaiters(jobId);
+      }
+    });
   }
 
   getTranscriptRevision(sessionId: string): number {
@@ -341,6 +394,23 @@ export class ExtensionCaptureController {
     void this.pipeline.finish(sessionId).catch(() => undefined);
   }
 
+  private resolveJobWaiters(jobId: string): void {
+    const waiters = this.jobWaiters.get(jobId);
+    if (!waiters) return;
+    for (const waiter of [...waiters]) this.settleJobWaiter(jobId, waiter);
+  }
+
+  private settleJobWaiter(jobId: string, waiter: JobWaiter): void {
+    const waiters = this.jobWaiters.get(jobId);
+    if (!waiters?.delete(waiter)) return;
+    if (waiters.size === 0) this.jobWaiters.delete(jobId);
+    clearTimeout(waiter.timer);
+    if (waiter.signal && waiter.abort) {
+      waiter.signal.removeEventListener('abort', waiter.abort);
+    }
+    waiter.resolve(this.getBindingForJob(jobId));
+  }
+
   private requireBinding(sessionId: string): MutableBinding {
     const binding = this.bindings.get(sessionId);
     if (!binding) throw new VoiceVacError('STREAM_ENDED');
@@ -373,6 +443,12 @@ function assertStartRequest(request: ExtensionCaptureStartRequest): void {
   }
   if (request.jobId !== undefined && !request.jobId.trim()) {
     throw new Error('Extension capture job id must be nonempty when supplied.');
+  }
+}
+
+function assertJobId(jobId: string): void {
+  if (!jobId || jobId.trim() !== jobId || jobId.length > 200) {
+    throw new Error('Extension capture job id must be a nonempty bounded string.');
   }
 }
 

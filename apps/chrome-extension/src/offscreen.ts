@@ -26,6 +26,7 @@ let operationTail: Promise<void> = Promise.resolve();
 let stateUpdateTail: Promise<void> = Promise.resolve();
 let transcriptionWork: Promise<void> | undefined;
 let downsampler = new StreamingDownsampler();
+let paused = false;
 
 async function getCaptureState(): Promise<CaptureState> {
   return normalizeCaptureState(await chrome.runtime.sendMessage({
@@ -49,13 +50,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     ? () => startCapture(message)
     : message.type === 'audio:stop'
       ? async () => ({ state: await stopCapture() })
-      : message.type === 'audio:cancel'
-        ? async () => ({ state: await cancelCapture() })
-        : message.type === 'audio:retry'
-          ? async () => {
-              throw new Error('Voice VAC cannot retry audio that was not retained by Chrome.');
-            }
-          : undefined;
+      : message.type === 'audio:pause'
+        ? async () => ({ state: await pauseCapture() })
+        : message.type === 'audio:resume'
+          ? async () => ({ state: await resumeCapture() })
+          : message.type === 'audio:cancel'
+            ? async () => ({ state: await cancelCapture() })
+            : message.type === 'audio:retry'
+              ? async () => {
+                  throw new Error('Voice VAC cannot retry audio that was not retained by Chrome.');
+                }
+              : undefined;
   if (!operation) return;
 
   void serializeCaptureOperation(operation)
@@ -72,6 +77,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 async function startCapture(message: {
   bridge?: BridgeConfig;
+  jobId?: string;
   mode: TranscriptionMode;
   route: unknown;
   streamId: string;
@@ -89,6 +95,7 @@ async function startCapture(message: {
 
   await releaseAudioGraph();
   downsampler.reset();
+  paused = false;
   mode = message.mode;
   tabTitle = message.tabTitle;
   tabUrl = message.tabUrl;
@@ -130,6 +137,7 @@ async function startCapture(message: {
     }
 
     sessionId = await startedRelay.start({
+      ...(message.jobId ? { jobId: message.jobId } : {}),
       mode: message.mode,
       tabTitle: message.tabTitle,
       tabUrl: message.tabUrl,
@@ -230,6 +238,44 @@ async function stopCapture(): Promise<CaptureState> {
   return transcribing;
 }
 
+async function pauseCapture(): Promise<CaptureState> {
+  if (!relay || !sessionId) return getCaptureState();
+  paused = true;
+  await audioContext?.suspend();
+  const current = await getCaptureState();
+  const next: CaptureState = {
+    ...current,
+    active: false,
+    phase: 'paused',
+    route: 'desktop-local',
+    sessionId,
+    tabTitle,
+    tabUrl,
+    tunnelSessionId
+  };
+  await saveCaptureState(next);
+  return next;
+}
+
+async function resumeCapture(): Promise<CaptureState> {
+  if (!relay || !sessionId) return getCaptureState();
+  await audioContext?.resume();
+  paused = false;
+  const current = await getCaptureState();
+  const next: CaptureState = {
+    ...current,
+    active: true,
+    phase: 'capturing',
+    route: 'desktop-local',
+    sessionId,
+    tabTitle,
+    tabUrl,
+    tunnelSessionId
+  };
+  await saveCaptureState(next);
+  return next;
+}
+
 async function finishTranscription(
   activeRelay: DesktopAudioRelay,
   stopResult: Promise<DesktopTranscriptSnapshot>,
@@ -292,6 +338,7 @@ function queueAudio(
   activeRelay: DesktopAudioRelay
 ): void {
   if (generation !== captureGeneration || relay !== activeRelay) return;
+  if (paused) return;
   try {
     activeRelay.append(downsampler.resample(samples, sourceRate));
   } catch (error) {
@@ -359,6 +406,7 @@ function clearCapture(generation: number): void {
   tabTitle = undefined;
   tabUrl = undefined;
   tunnelSessionId = undefined;
+  paused = false;
   downsampler.reset();
 }
 

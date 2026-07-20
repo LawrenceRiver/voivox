@@ -7,41 +7,72 @@ import XCTest
 
 @MainActor
 final class TransparentCompositionTests: XCTestCase {
-    func testAuthoredDeviceFitsInsideTheCapsuleCameraWithBreathingRoom() async throws {
+    func testActiveAuthoredDeviceProducesAReadableCenteredCapsuleFraming() async throws {
         let capsuleSize = OverlayMetrics.phaseOne.capsuleSize
-        let device = try await RealityAssetLoader().loadDevice()
-        let anchor = AnchorEntity(world: .zero)
-        device.position = DeviceRealityView.deviceOffset
-        anchor.addChild(device)
-        let bounds = device.visualBounds(
-            recursive: true,
-            relativeTo: anchor,
-            excludeInactive: false
-        )
+        let controller = VoiceVACDeviceInteractionController()
+        let device = try await controller.loadMainDevice()
+        let bounds = DeviceRealityView.activeVisualBounds(entity: device)
+        let framing = try DeviceRealityView.framing(entity: device, viewport: capsuleSize)
+        let projected = framing.project(bounds: bounds)
 
-        let aspect = Float(capsuleSize.width / capsuleSize.height)
-        let horizontalHalfAngle = DeviceRealityView.horizontalFieldOfViewDegrees * .pi / 360
-        let verticalHalfAngle = atan(tan(horizontalHalfAngle) / aspect)
-        let nearestDepth = DeviceRealityView.cameraDistance - bounds.max.z
-        XCTAssertGreaterThan(nearestDepth, 0, "The camera must remain in front of the entire authored device")
-        let visibleHeight = 2 * nearestDepth * tan(verticalHalfAngle)
+        XCTAssertGreaterThanOrEqual(projected.width, 280)
+        XCTAssertGreaterThanOrEqual(projected.height, 90)
+        XCTAssertGreaterThanOrEqual(projected.minX, 8)
+        XCTAssertLessThanOrEqual(projected.maxX, capsuleSize.width - 8)
+        XCTAssertGreaterThanOrEqual(projected.minY, 8)
+        XCTAssertLessThanOrEqual(projected.maxY, capsuleSize.height - 8)
+        XCTAssertEqual(projected.midX, capsuleSize.width / 2, accuracy: 0.5)
+        XCTAssertEqual(projected.midY, capsuleSize.height / 2, accuracy: 0.5)
+        XCTAssertNotNil(device.findEntity(named: "VAC_PORT"))
+        XCTAssertNotNil(device.findEntity(named: "VAC_BUTTON_CAP"))
+    }
 
-        XCTAssertLessThanOrEqual(
-            bounds.extents.y,
-            visibleHeight * 0.90,
-            "The authored vacuum controls must retain at least 10% vertical glass breathing room"
+    func testAuthoredNozzleProducesAReadableFramingInsideIts96PointHitPanel() async throws {
+        let controller = VoiceVACDeviceInteractionController()
+        let nozzle = try await controller.loadNozzleClone()
+        let root = Entity()
+        root.addChild(nozzle)
+        controller.bindNozzlePresentationRoot(root)
+        let bounds = DeviceRealityView.activeVisualBounds(entity: root)
+        let size = NozzleHitPanel.dockedSize
+        let framing = try DeviceRealityView.framing(entity: root, viewport: size)
+        let projected = framing.project(bounds: bounds)
+
+        XCTAssertEqual(bounds.center.x, 0, accuracy: 0.001)
+        XCTAssertEqual(framing.lookAtPosition.x, bounds.center.x, accuracy: 0.001)
+        XCTAssertEqual(framing.lookAtPosition.y, bounds.center.y, accuracy: 0.001)
+        XCTAssertGreaterThanOrEqual(projected.height, 76)
+        XCTAssertLessThanOrEqual(projected.height, 82)
+        XCTAssertGreaterThanOrEqual(projected.minY, 7)
+        XCTAssertLessThanOrEqual(projected.maxY, size.height - 7)
+        XCTAssertEqual(projected.midX, size.width / 2, accuracy: 0.5)
+        XCTAssertEqual(projected.midY, size.height / 2, accuracy: 0.5)
+        XCTAssertNotNil(root.findEntity(named: "VAC_NOZZLE_TIP"))
+    }
+
+    func testRuntimeUSDZControlBoundsMatchTheSharedDesignProjection() async throws {
+        let controller = VoiceVACDeviceInteractionController()
+        let device = try await controller.loadMainDevice()
+        let port = try XCTUnwrap(device.findEntity(named: "VAC_PORT"))
+        let button = try XCTUnwrap(device.findEntity(named: "VAC_BUTTON_CAP"))
+        let framing = try DeviceRealityView.framing(
+            entity: device,
+            viewport: OverlayMetrics.phaseOne.capsuleSize
         )
-        let verticalLimit = visibleHeight * 0.45
-        XCTAssertGreaterThanOrEqual(
-            bounds.min.y,
-            -verticalLimit,
-            "The authored vacuum controls must not clip the lower glass edge"
+        let runtimePort = try framing.projectVisualBounds(
+            DeviceRealityView.activeVisualBounds(entity: port)
         )
-        XCTAssertLessThanOrEqual(
-            bounds.max.y,
-            verticalLimit,
-            "The authored vacuum controls must not clip the upper glass edge"
+        let runtimeButton = try framing.projectVisualBounds(
+            DeviceRealityView.activeVisualBounds(entity: button)
         )
+        let design = CapsuleControlLayout.projection
+
+        XCTAssertEqual(runtimePort.midX, design.portAnchor.x, accuracy: 1)
+        XCTAssertEqual(runtimePort.midY, design.portAnchor.y, accuracy: 1)
+        XCTAssertEqual(runtimeButton.midX, design.buttonAnchor.x, accuracy: 1)
+        XCTAssertEqual(runtimeButton.midY, design.buttonAnchor.y, accuracy: 1)
+        XCTAssertTrue(design.portHitFrame.contains(runtimePort))
+        XCTAssertTrue(design.buttonHitFrame.contains(runtimeButton))
     }
 
     func testHoseViewportIsARealTransparentPremultipliedMetalSurface() throws {

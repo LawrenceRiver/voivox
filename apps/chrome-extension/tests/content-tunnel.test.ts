@@ -294,13 +294,10 @@ describe('Voice VAC armed page drop tunnel', () => {
       }));
 
       prompt?.dispatchEvent(harness.click({ trusted: false }));
-      expect(harness.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'playback:user-started' }));
       prompt?.dispatchEvent(harness.click({ trusted: true }));
-      expect(harness.sendMessage).toHaveBeenCalledWith({
-        target: 'service-worker',
-        type: 'playback:user-started',
-        sessionId: SESSION_ID
-      });
+      expect(harness.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+        type: 'playback:user-started'
+      }));
     }
   );
 
@@ -429,6 +426,71 @@ describe('Voice VAC armed page drop tunnel', () => {
     expect(document.querySelector('#vacvox-tunnel-root')).toBeNull();
   });
 
+  it('plays and pauses only the exact attached HTML media target', async () => {
+    const video = visibleElement('video', rect(40, 50, 640, 360));
+    const play = vi.spyOn(video, 'play').mockResolvedValue(undefined);
+    const pause = vi.spyOn(video, 'pause').mockImplementation(() => undefined);
+    const runtime = createRuntimeHarness([video]);
+    await runtime.attachTarget();
+
+    await expect(runtime.dispatch({
+      target: 'content-tunnel',
+      type: 'playback:play',
+      sessionId: SESSION_ID,
+      targetId: TARGET_ID
+    })).resolves.toEqual({ status: 'playing' });
+    await expect(runtime.dispatch({
+      target: 'content-tunnel',
+      type: 'playback:pause',
+      sessionId: SESSION_ID,
+      targetId: TARGET_ID
+    })).resolves.toEqual({ ok: true });
+
+    expect(play).toHaveBeenCalledOnce();
+    expect(pause).toHaveBeenCalledOnce();
+  });
+
+  it('falls back to one trusted page click without synthesizing a media click', async () => {
+    const video = visibleElement('video', rect(40, 50, 640, 360));
+    const click = vi.spyOn(video, 'click');
+    vi.spyOn(video, 'play').mockRejectedValue(new DOMException('blocked', 'NotAllowedError'));
+    const runtime = createRuntimeHarness([video]);
+    await runtime.attachTarget();
+
+    await expect(runtime.dispatch({
+      target: 'content-tunnel',
+      type: 'playback:play',
+      sessionId: SESSION_ID,
+      targetId: TARGET_ID
+    })).resolves.toEqual({
+      status: 'user-play-required',
+      code: 'USER_PLAY_REQUIRED'
+    });
+    expect(runtime.prompt()?.textContent).toBe('Press play once in Chrome.');
+    expect(click).not.toHaveBeenCalled();
+
+    document.dispatchEvent(runtime.click({ trusted: false }));
+    expect(runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'playback:user-started'
+    }));
+    document.dispatchEvent(runtime.click({ trusted: true }));
+    document.dispatchEvent(runtime.click({ trusted: true }));
+    expect(runtime.sendMessage).toHaveBeenCalledTimes(2);
+    expect(runtime.sendMessage).toHaveBeenLastCalledWith({
+      target: 'service-worker',
+      type: 'playback:user-started',
+      sessionId: SESSION_ID
+    });
+
+    await runtime.dispatch({
+      target: 'content-tunnel',
+      type: 'playback:dispose',
+      sessionId: SESSION_ID,
+      targetId: TARGET_ID
+    });
+    expect(runtime.prompt()).toBeNull();
+  });
+
   it('uses an isolated-world global marker that hostile page DOM and string globals cannot spoof', () => {
     document.documentElement.dataset.voiceVacContentTunnelRuntimeV1 = 'true';
     (window as unknown as Record<string, unknown>).voiceVacContentTunnelRuntimeV1 = true;
@@ -546,6 +608,68 @@ function createHarness(initialElements: Element[]) {
     }
   };
 }
+
+function createRuntimeHarness(initialElements: Element[]) {
+  let listener: RuntimeListener | undefined;
+  const trusted = new WeakSet<Event>();
+  const sendMessage = vi.fn().mockResolvedValue({ ok: true });
+  vi.stubGlobal('chrome', {
+    runtime: {
+      getURL: (path: string) => path,
+      onMessage: { addListener: vi.fn((value: RuntimeListener) => { listener = value; }) },
+      sendMessage
+    }
+  });
+  registerContentTunnelRuntime({
+    document,
+    window,
+    elementsFromPoint: () => initialElements,
+    isTrustedEvent: (event) => event.isTrusted || trusted.has(event),
+    randomUUID: () => TARGET_ID,
+    sendMessage
+  });
+  const dispatch = (message: Record<string, unknown>): Promise<unknown> => new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('content response timeout')), 500);
+    const sendResponse = (response: unknown) => {
+      clearTimeout(timeout);
+      resolve(response);
+    };
+    const keepAlive = listener?.(message, {}, sendResponse);
+    if (keepAlive !== true && message.type?.toString().startsWith('playback:')) {
+      queueMicrotask(() => {
+        if (keepAlive === undefined) {
+          clearTimeout(timeout);
+          reject(new Error('playback message was not handled'));
+        }
+      });
+    }
+  });
+  return {
+    dispatch,
+    sendMessage,
+    prompt: () => document.querySelector('#vacvox-tunnel-root')?.shadowRoot
+      ?.querySelector<HTMLButtonElement>('.voice-vac-play-prompt') ?? null,
+    click({ trusted: isTrusted }: { trusted: boolean }) {
+      const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+      if (isTrusted) trusted.add(event);
+      return event;
+    },
+    async attachTarget() {
+      await dispatch({ type: 'session:armed', session: armedSession() });
+      await dispatch({ type: 'drag:begin', sessionId: SESSION_ID, dropToken: DROP_TOKEN });
+      const dropped = dragEvent('drop', ['text/plain'], DROP_TOKEN);
+      trusted.add(dropped);
+      document.dispatchEvent(dropped);
+      await flushMicrotasks();
+    }
+  };
+}
+
+type RuntimeListener = (
+  message: Record<string, unknown>,
+  sender: unknown,
+  sendResponse: (response: unknown) => void
+) => boolean | void;
 
 function dragEvent(type: 'dragover' | 'drop', types: string[], text: string): DragEvent {
   const event = new Event(type, { bubbles: true, cancelable: true }) as DragEvent;

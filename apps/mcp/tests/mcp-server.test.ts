@@ -56,7 +56,11 @@ describe('Voice Vac MCP wrapper', () => {
       },
       [{ startMs: 0, endMs: 2_400, text: '这是视频里的第一段话。' }]
     );
-    loopback = await createVoivoxLoopbackServer({ token: 'desktop-only-token', service });
+    loopback = await createVoivoxLoopbackServer({
+      token: 'desktop-only-token',
+      service,
+      onActiveVideoTranscription: async () => service.getLatestBrowserTranscript()
+    });
     const voivox = new VoivoxClient({ baseUrl: loopback.baseUrl, token: 'desktop-only-token' });
     const server = createVoivoxMcpServer(voivox);
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -106,7 +110,7 @@ describe('Voice Vac MCP wrapper', () => {
     expect(result.structuredContent).toEqual({
       error: {
         code: 'PVTT_NO_ACTIVE_VIDEO',
-        message: expect.stringContaining('No completed browser video')
+        message: expect.stringContaining('No active armed browser video')
       }
     });
   });

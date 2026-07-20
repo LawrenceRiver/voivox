@@ -81,7 +81,7 @@
     <rect x="1000" y="220" width="64" height="64" rx="18" fill="#dff1ea"/>
     <path d="M1032 232 v28 M1020 246 h24 M1026 270 h14" fill="none" stroke="#176f67" stroke-width="5" stroke-linecap="round"/>
     <text x="1090" y="249" class="label">Local ASR</text>
-    <text x="1090" y="277" class="body">Qwen3-ASR / Whisper</text>
+    <text x="1090" y="277" class="body">Qwen3-ASR-0.6B · offline</text>
     <text x="1000" y="333" class="small">PROVIDER INTERFACE</text>
     <text x="1000" y="360" class="body">• stream → incremental text</text>
     <text x="1000" y="385" class="body">• batch → ordered chunks</text>
@@ -132,7 +132,7 @@
     <circle cx="1108" cy="635" r="24" fill="#f8ead1"/><path d="M1096 640 q12 -22 24 0" fill="none" stroke="#c77a28" stroke-width="5" stroke-linecap="round"/>
     <text x="1150" y="642" class="label">Stage &amp; Validation</text>
     <text x="1092" y="692" class="body">MVP Live Tunnel：已实现并测试</text>
-    <text x="1092" y="723" class="body">Accelerated Decode：边界与回退已实现</text>
+    <text x="1092" y="723" class="body">Accelerated Decode：能力门控；Live 为已验证回退</text>
     <text x="1092" y="754" class="body">Chrome 音频隔离：需真实用户设备手测</text>
     <rect x="1092" y="775" width="200" height="30" rx="15" fill="#fff2dc"/>
     <text x="1192" y="795" text-anchor="middle" class="status" fill="#b7661f">MANUAL GATE REMAINS</text>

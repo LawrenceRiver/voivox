@@ -14,6 +14,9 @@ release/
 # Native build state
 native/macos/.build/
 native/macos/.derived/
+native/macos/build/
+native/macos/App/build/
+native/asr/__pycache__/
 native/macos/App/VoiceVAC.xcodeproj/
 
 # Local credentials, runtime data, and operating-system files
@@ -27,3 +30,5 @@ native/macos/App/VoiceVAC.xcodeproj/
 .idea/
 .vscode/
 .playwright-cli/
+.chrome-task2-review.*/
+.superpowers/

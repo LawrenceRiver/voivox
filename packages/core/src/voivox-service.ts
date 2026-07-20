@@ -216,10 +216,23 @@ export class VoivoxService {
         && candidate.status === 'complete'
         && candidate.rawSegments.length > 0
     );
-    if (!session) {
+    return session ? this.transcriptResultForSession(session) : undefined;
+  }
+
+  getBrowserTranscript(sessionId: string): TranscriptResult | undefined {
+    const session = this.getSession(sessionId);
+    if (
+      !session
+      || session.source.kind !== 'chrome-tab'
+      || session.status !== 'complete'
+      || session.rawSegments.length === 0
+    ) {
       return undefined;
     }
+    return this.transcriptResultForSession(session);
+  }
 
+  private transcriptResultForSession(session: CaptureSession): TranscriptResult {
     const segments = session.rawSegments.map((segment) => ({
       start: segment.startMs / 1_000,
       end: segment.endMs / 1_000,

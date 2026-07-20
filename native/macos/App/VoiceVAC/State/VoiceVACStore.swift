@@ -16,4 +16,12 @@ final class VoiceVACStore {
         state = transition.state
         return transition.effects
     }
+
+    /// Native-only presentation failures (for example, no armed Chrome session)
+    /// must not invent a cross-window attempt UUID merely to enter warning state.
+    func reportLocalFailure(_ failure: VoiceVACFailure) {
+        state.phase = .warningYellow
+        state.failure = failure
+        state.attemptID = nil
+    }
 }

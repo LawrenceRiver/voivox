@@ -75,18 +75,18 @@ describe('PythonQwenAsrEngine readiness', () => {
 
   it('lets startup status refresh inactivity but never the hard deadline', async () => {
     const active = engine('startup-hard-timeout', {
-      startupInactivityTimeoutMs: 120,
-      startupHardTimeoutMs: 320,
+      startupInactivityTimeoutMs: 500,
+      startupHardTimeoutMs: 800,
       workerEnv: { PROTOCOL_WORKER_SCENARIO: 'startup-hard-timeout', PROTOCOL_WORKER_DELAY_MS: '40' }
     });
 
     const startedAt = Date.now();
     await expect(active.start()).rejects.toMatchObject({ code: 'ASR_STARTUP_TIMEOUT' });
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(250);
-    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(650);
+    expect(Date.now() - startedAt).toBeLessThan(1_500);
 
     const silent = engine('startup-inactivity-timeout', {
-      startupInactivityTimeoutMs: 120,
+      startupInactivityTimeoutMs: 500,
       startupHardTimeoutMs: 2_000
     });
     await expect(silent.start()).rejects.toMatchObject({ code: 'ASR_STARTUP_TIMEOUT' });

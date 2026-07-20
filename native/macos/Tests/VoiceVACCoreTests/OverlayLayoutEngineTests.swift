@@ -22,6 +22,15 @@ struct OverlayLayoutEngineTests {
         #expect(layout.capsuleFrame.maxX == screen.visibleFrame.maxX - 24)
         #expect(layout.capsuleFrame.minY == screen.visibleFrame.minY + 24)
         #expect(layout.hoseFrames == [screen.id: screen.frame])
+
+        let controls = try! VoiceVACDevicePresentationDesign.makeControlProjection(
+            viewport: OverlayMetrics.phaseOne.capsuleSize,
+            hitTargetSize: OverlayMetrics.phaseOne.nozzleHitSize
+        )
+        #expect(layout.nozzleHitFrame == controls.portHitFrame.offsetBy(
+            dx: layout.capsuleFrame.minX,
+            dy: layout.capsuleFrame.minY
+        ))
     }
 
     @Test("normalized placement resolves on a negative-coordinate monitor")

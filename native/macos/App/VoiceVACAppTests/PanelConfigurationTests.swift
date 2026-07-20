@@ -101,9 +101,22 @@ final class PanelConfigurationTests: XCTestCase {
         XCTAssertEqual(glass.style, .clear)
         XCTAssertEqual(glass.cornerRadius, 58)
         let tintAlpha = try! XCTUnwrap(glass.tintColor?.usingColorSpace(.deviceRGB)?.alphaComponent)
-        XCTAssertEqual(tintAlpha, 0.08, accuracy: 0.001)
+        XCTAssertEqual(tintAlpha, 0.12, accuracy: 0.001)
         XCTAssertTrue(glass.dragSurface.isDescendant(of: try! XCTUnwrap(glass.contentView)))
         XCTAssertTrue(glass.dragSurface.autoresizingMask.contains([.width, .height]))
+        XCTAssertTrue(glass.glassEdgeView.isDescendant(of: try! XCTUnwrap(glass.contentView)))
+        XCTAssertNil(glass.glassEdgeView.hitTest(CGPoint(x: 203, y: 58)))
+
+        let outerAlpha = try! XCTUnwrap(
+            CapsuleGlassEdgeView.outerStrokeColor.usingColorSpace(.deviceRGB)?.alphaComponent
+        )
+        let innerAlpha = try! XCTUnwrap(
+            CapsuleGlassEdgeView.innerStrokeColor.usingColorSpace(.deviceRGB)?.alphaComponent
+        )
+        XCTAssertGreaterThanOrEqual(outerAlpha, 0.15, "dark hairline must survive a white webpage")
+        XCTAssertGreaterThanOrEqual(innerAlpha, 0.70, "white catchlight must survive a dark video")
+        XCTAssertLessThanOrEqual(CapsuleGlassEdgeView.outerLineWidth, 1.5)
+        XCTAssertLessThanOrEqual(CapsuleGlassEdgeView.innerLineWidth, 1)
     }
 
     func testTranscriptUsesRealClearLiquidGlassAndExactContentLayout() {
@@ -118,10 +131,16 @@ final class PanelConfigurationTests: XCTestCase {
 
     func testCapsuleDragSurfaceRejectsNozzleAndButtonHitRegions() {
         let glass = CapsuleGlassView(frame: CGRect(origin: .zero, size: CGSize(width: 406, height: 116)))
+        let projection = CapsuleControlLayout.projection
 
-        XCTAssertFalse(glass.dragSurface.canBeginDrag(at: CGPoint(x: 48, y: 58)))
+        XCTAssertEqual(CapsuleDragSurfaceView.nozzleHitFrame, projection.portHitFrame)
+        XCTAssertEqual(CapsuleDragSurfaceView.buttonHitFrame, projection.buttonHitFrame)
+        XCTAssertEqual(glass.physicalButton.frame, projection.buttonHitFrame)
+        XCTAssertFalse(glass.dragSurface.canBeginDrag(at: projection.portAnchor))
+        XCTAssertFalse(glass.dragSurface.canBeginDrag(at: projection.buttonAnchor))
         XCTAssertTrue(glass.dragSurface.canBeginDrag(at: CGPoint(x: 203, y: 58)))
-        XCTAssertFalse(glass.dragSurface.canBeginDrag(at: CGPoint(x: 358, y: 58)))
+        XCTAssertTrue(glass.dragSurface.canBeginDrag(at: CGPoint(x: 48, y: 58)))
+        XCTAssertTrue(glass.dragSurface.canBeginDrag(at: CGPoint(x: 358, y: 58)))
     }
 
     private func makePanels() -> [NSPanel] {

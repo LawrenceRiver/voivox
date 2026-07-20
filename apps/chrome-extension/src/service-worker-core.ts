@@ -11,6 +11,13 @@ import {
 } from './capture-errors.js';
 import { chooseTranscriptionRoute, type TranscriptionMode } from './local-transcription.js';
 import { discoverNativeDesktop } from './native-discovery.js';
+import {
+  createNativeCommandChannel,
+  type NativeCommand,
+  type NativeCommandChannel
+} from './native-command-channel.js';
+import type { PlaybackDriver } from './playback-driver.js';
+import { StorePlaybackDriver } from './store-playback-driver.js';
 import { syncTunnelSession } from './tunnel-session-sync.js';
 import {
   armActiveTab,
@@ -24,6 +31,10 @@ import type { TargetSession } from './target-session.js';
 let operationTail: Promise<void> = Promise.resolve();
 let acceptingCaptureStart = false;
 const targetSessionStore = new TargetSessionStore();
+let playbackDriver: PlaybackDriver | undefined;
+let nativeCommandChannel: NativeCommandChannel | undefined;
+const MAXIMUM_COMMAND_AGE_MS = 2 * 60_000;
+const MAXIMUM_COMMAND_FUTURE_MS = 30_000;
 
 class CaptureOperationError extends Error {
   constructor(
@@ -38,9 +49,22 @@ class CaptureOperationError extends Error {
 
 export type ServiceWorkerRuntimeOptions = {
   channel: 'store' | 'automation';
+  createPlaybackDriver?: () => PlaybackDriver;
 };
 
 export function createServiceWorkerRuntime(options: ServiceWorkerRuntimeOptions): void {
+  playbackDriver = options.createPlaybackDriver?.() ?? new StorePlaybackDriver();
+  if (options.channel === 'automation' && !options.createPlaybackDriver) {
+    throw new Error('Voice VAC Automation requires its injected playback driver.');
+  }
+  if (typeof chrome.runtime.connectNative === 'function') {
+    nativeCommandChannel = createNativeCommandChannel({
+      connectNative: (host) => chrome.runtime.connectNative(host),
+      dispatch: dispatchNativeCommand,
+      onDispatchError: (error) => { void publishCommandFailure(error); }
+    });
+    nativeCommandChannel.start();
+  }
   registerRuntimeMessages(options);
   registerTargetLifecycle({
     tabs: chrome.tabs,
@@ -78,6 +102,18 @@ function registerRuntimeMessages(_options: ServiceWorkerRuntimeOptions): void {
     void previewTargetSession(message, sender)
       .then(() => sendResponse({ ok: true }))
       .catch((error: unknown) => sendResponse(targetMessageFailure(error)));
+    return true;
+  }
+
+  if (message.type === 'playback:user-started' || message.type === 'playback:ended') {
+    void serializeOperation(async () => {
+      await handlePlaybackMessage(message, sender);
+      return getCaptureState();
+    })
+      .then(sendResponse)
+      .catch((error: unknown) => sendResponse({
+        error: error instanceof Error ? error.message : 'Voice VAC playback could not be controlled.'
+      }));
     return true;
   }
 
@@ -144,6 +180,7 @@ async function persistOffscreenCaptureState(value: unknown): Promise<CaptureStat
   if (state.phase === 'complete') state.linkState = 'completed';
   if (state.phase === 'error') state.linkState = 'error';
   if (state.phase === 'transcribing' || state.phase === 'downloading') state.linkState = 'transcribing';
+  if (state.phase === 'paused') state.linkState = 'paused';
   if (state.phase === 'idle' && !state.tunnelSessionId) state.linkState = 'idle';
   if (state.tunnelSessionId) {
     const discovery = await discoverNativeDesktop();
@@ -266,7 +303,7 @@ async function cancelTranscription(current: CaptureState): Promise<CaptureState>
   return getCaptureState();
 }
 
-async function startCapture(mode: TranscriptionMode): Promise<CaptureState> {
+async function startCapture(mode: TranscriptionMode, jobId?: string): Promise<CaptureState> {
   const desktop = await discoverNativeDesktop();
   const route = chooseTranscriptionRoute(desktop);
   if (route === 'unavailable') {
@@ -301,6 +338,7 @@ async function startCapture(mode: TranscriptionMode): Promise<CaptureState> {
   try {
     response = await chrome.runtime.sendMessage({
       bridge,
+      ...(jobId ? { jobId } : {}),
       mode,
       route,
       streamId,
@@ -326,6 +364,176 @@ async function startCapture(mode: TranscriptionMode): Promise<CaptureState> {
     await saveCaptureState({ ...next, linkState: 'transcribing' });
   }
   return getCaptureState();
+}
+
+async function dispatchNativeCommand(command: NativeCommand): Promise<void> {
+  const age = Date.now() - command.issuedAt;
+  if (age > MAXIMUM_COMMAND_AGE_MS || age < -MAXIMUM_COMMAND_FUTURE_MS) return;
+  const targetSession = await targetSessionStore.get();
+  if (!targetSession || targetSession.id !== command.sessionId) {
+    throw new CaptureOperationError('The native command target is no longer armed.', 'TAB_NOT_ARMED', true);
+  }
+
+  switch (command.type) {
+    case 'drag-begin':
+      await sendTargetMessage(targetSession, {
+        dropToken: targetSession.dropToken,
+        sessionId: targetSession.id,
+        type: 'drag:begin'
+      });
+      return;
+    case 'drag-cancel':
+      await sendTargetMessage(targetSession, { sessionId: targetSession.id, type: 'drag:cancel' });
+      return;
+    case 'capture-start':
+      await dispatchCaptureStart(targetSession, command.commandId);
+      return;
+    case 'capture-pause':
+      await dispatchCapturePause(targetSession);
+      return;
+    case 'capture-resume':
+      await dispatchCaptureResume(targetSession);
+      return;
+    case 'capture-stop':
+      await dispatchCaptureStop(targetSession);
+      return;
+    case 'target-disconnect':
+      await dispatchTargetDisconnect(targetSession);
+      return;
+  }
+}
+
+async function dispatchCaptureStart(targetSession: TargetSession, jobId: string): Promise<void> {
+  const current = await getCaptureState();
+  if (isActiveCaptureState(current)) {
+    if (current.tunnelSessionId === targetSession.tunnelSessionId) return;
+    throw new CaptureOperationError('Voice VAC is already capturing another target.', 'STREAM_ENDED', true);
+  }
+  await startCapture(current.mode, jobId);
+  const driver = requirePlaybackDriver();
+  const result = await driver.play(targetSession);
+  if (result.status === 'user-play-required') {
+    const waiting = await getCaptureState();
+    await saveCaptureState({ ...waiting, phase: 'awaiting-user-play', linkState: 'transcribing' });
+    return;
+  }
+  if (result.status === 'failed') {
+    await stopCaptureAfterPlaybackFailure(result.code);
+    throw new CaptureOperationError('Voice VAC could not start the selected video.', result.code, true);
+  }
+}
+
+async function dispatchCapturePause(targetSession: TargetSession): Promise<void> {
+  const current = await getCaptureState();
+  if (!isActiveCaptureState(current)) return;
+  await requirePlaybackDriver().pause(targetSession);
+  const response = await chrome.runtime.sendMessage({ target: 'offscreen', type: 'audio:pause' }) as {
+    error?: string;
+    state?: CaptureState;
+  };
+  if (!response.state) throw new Error(response.error ?? 'Voice VAC could not pause the capture.');
+}
+
+async function dispatchCaptureResume(targetSession: TargetSession): Promise<void> {
+  const current = await getCaptureState();
+  if (current.phase !== 'paused') return;
+  const response = await chrome.runtime.sendMessage({ target: 'offscreen', type: 'audio:resume' }) as {
+    error?: string;
+    state?: CaptureState;
+  };
+  if (!response.state) throw new Error(response.error ?? 'Voice VAC could not resume the capture.');
+  const result = await requirePlaybackDriver().play(targetSession);
+  if (result.status === 'failed') throw new CaptureOperationError(
+    'Voice VAC could not resume the selected video.', result.code, true
+  );
+}
+
+async function dispatchCaptureStop(targetSession: TargetSession): Promise<void> {
+  const current = await getCaptureState();
+  if (!isActiveCaptureState(current)) return;
+  await requirePlaybackDriver().pause(targetSession).catch(() => undefined);
+  const response = await chrome.runtime.sendMessage({ target: 'offscreen', type: 'audio:stop' }) as {
+    error?: string;
+    state?: CaptureState;
+  };
+  if (!response.state) throw new Error(response.error ?? 'Voice VAC could not stop the capture.');
+}
+
+async function dispatchTargetDisconnect(targetSession: TargetSession): Promise<void> {
+  const current = await getCaptureState();
+  if (isActiveCaptureState(current)) await dispatchCaptureStop(targetSession);
+  await requirePlaybackDriver().dispose(targetSession);
+  await sendTargetMessage(targetSession, { sessionId: targetSession.id, type: 'target-disconnect' });
+}
+
+async function stopCaptureAfterPlaybackFailure(code: CaptureErrorCode): Promise<void> {
+  const response = await chrome.runtime.sendMessage({ target: 'offscreen', type: 'audio:cancel' }) as {
+    state?: CaptureState;
+  };
+  if (!response.state) return;
+  const current = await getCaptureState();
+  await saveCaptureState({
+    ...current,
+    active: false,
+    canRetry: true,
+    error: 'Voice VAC could not start the selected video.',
+    errorCode: code,
+    phase: 'error'
+  });
+}
+
+async function handlePlaybackMessage(
+  message: Record<string, unknown>,
+  sender: chrome.runtime.MessageSender
+): Promise<void> {
+  const targetSession = await targetSessionStore.get();
+  if (!targetSession || typeof message.sessionId !== 'string'
+    || message.sessionId !== targetSession.id
+    || !validateSessionSender(targetSession, sender)) return;
+  if (message.type === 'playback:ended') {
+    await dispatchCaptureStop(targetSession);
+    return;
+  }
+  const current = await getCaptureState();
+  if (isActiveCaptureState(current)) {
+    const result = await requirePlaybackDriver().play(targetSession);
+    if (result.status === 'failed') {
+      throw new CaptureOperationError('Voice VAC could not start the selected video.', result.code, true);
+    }
+    if (result.status === 'playing') {
+      await saveCaptureState({ ...current, active: true, phase: 'capturing', linkState: 'transcribing' });
+    }
+  }
+}
+
+async function sendTargetMessage(targetSession: TargetSession, message: Record<string, unknown>): Promise<unknown> {
+  return chrome.tabs.sendMessage(targetSession.tabId, message, {
+    documentId: targetSession.documentId,
+    frameId: targetSession.frameId
+  });
+}
+
+function requirePlaybackDriver(): PlaybackDriver {
+  if (!playbackDriver) throw new CaptureOperationError(
+    'Voice VAC playback is not ready.',
+    'EXTENSION_UNAVAILABLE',
+    true
+  );
+  return playbackDriver;
+}
+
+async function publishCommandFailure(error: unknown): Promise<void> {
+  const current = await getCaptureState().catch(() => undefined);
+  if (!current) return;
+  const failure = error instanceof CaptureOperationError ? error : undefined;
+  await saveCaptureState({
+    ...current,
+    active: false,
+    canRetry: failure?.retryable ?? true,
+    error: error instanceof Error ? error.message : 'Voice VAC command failed.',
+    ...(failure?.code ? { errorCode: failure.code } : {}),
+    phase: 'error'
+  }).catch(() => undefined);
 }
 
 async function armCurrentDocument(): Promise<{
@@ -507,6 +715,7 @@ function isActiveCaptureState(state: CaptureState): boolean {
   return state.active
     || state.phase === 'capturing'
     || state.phase === 'paused'
+    || state.phase === 'awaiting-user-play'
     || state.phase === 'downloading'
     || state.phase === 'transcribing';
 }

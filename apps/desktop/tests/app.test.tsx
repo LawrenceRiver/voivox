@@ -79,7 +79,7 @@ describe('Voice Vac desktop app', () => {
 
     expect(await screen.findByText('TRANSCRIPT BAY')).toBeTruthy();
     expect(screen.getByText('01 · SOURCE')).toBeTruthy();
-    expect(screen.getByText('Runs standalone')).toBeTruthy();
+    expect(screen.getByText('Waiting for App')).toBeTruthy();
     expect(window.localStorage.getItem('voivoxLocale')).toBe('en');
     expect(document.documentElement.lang).toBe('en');
   });

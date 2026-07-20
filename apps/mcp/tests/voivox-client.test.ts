@@ -3,7 +3,11 @@ import { createServer, type Server, type ServerResponse } from 'node:http';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createVoivoxLoopbackServer, type VoivoxLoopbackServer } from '@voivox/core';
+import {
+  createTranscriptResult,
+  createVoivoxLoopbackServer,
+  type VoivoxLoopbackServer
+} from '@voivox/core';
 import { parseVoivoxConnection } from '../src/index.js';
 import { VoivoxClient } from '../src/voivox-client.js';
 
@@ -34,6 +38,33 @@ describe('VoivoxClient', () => {
 
     expect(started).toMatchObject({ status: 'capturing' });
     expect(status).toMatchObject({ activeSession: { id: started.id } });
+  });
+
+  it('uses the long capture deadline for active-video transcription', async () => {
+    server = await createVoivoxLoopbackServer({
+      token: 'desktop-only-token',
+      onActiveVideoTranscription: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return createTranscriptResult({
+          language: 'zh',
+          processing_mode: 'live_tunnel',
+          segments: [{ start: 0, end: 1, text: '当前视频' }],
+          title: 'Current video',
+          transcript: '当前视频'
+        });
+      }
+    });
+    const client = new VoivoxClient(
+      { baseUrl: server.baseUrl, token: 'desktop-only-token' },
+      { captureStopTimeoutMs: 100, requestTimeoutMs: 10 }
+    );
+
+    await expect(client.transcribeActiveVideo({
+      language: 'auto',
+      mode: 'auto',
+      output_format: 'text',
+      timestamps: false
+    })).resolves.toMatchObject({ transcript: '当前视频' });
   });
 
   it('lists selectable macOS processes without granting the Chrome bridge that capability', async () => {

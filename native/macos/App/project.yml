@@ -22,6 +22,16 @@ targets:
     productName: Voice VAC
     sources:
       - path: VoiceVAC
+    preBuildScripts:
+      - name: "Voice VAC backend resources"
+        script: |
+          set -eu
+          workspace="${SRCROOT}/../../.."
+          resources="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}"
+          mkdir -p "${resources}"
+          cp "${workspace}/apps/desktop/dist/headless/voice-vac-backend.mjs" "${resources}/voice-vac-backend.mjs"
+          cp "${workspace}/native/asr/voivox_asr_worker.py" "${resources}/voivox_asr_worker.py"
+          cp "${workspace}/native/asr/qwen_runtime.py" "${resources}/qwen_runtime.py"
     configFiles:
       Debug: Config/Debug.xcconfig
       Release: Config/Release.xcconfig
@@ -54,8 +64,36 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.voivox.app.tests
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/Voice VAC.app/Contents/MacOS/VoiceVAC
 
+  VoiceVACUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: VoiceVACUITests
+    dependencies:
+      - target: VoiceVAC
+    settings:
+      base:
+        ARCHS: arm64
+        CODE_SIGNING_ALLOWED: YES
+        CODE_SIGN_IDENTITY: "-"
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: io.voivox.app.uitests
+        TEST_TARGET_NAME: VoiceVAC
+
 schemes:
   VoiceVAC:
+    build:
+      targets:
+        VoiceVAC: all
+        VoiceVACAppTests: [test]
+        VoiceVACUITests: [test]
+    test:
+      targets:
+        - VoiceVACAppTests
+        - VoiceVACUITests
+
+  VoiceVACUnit:
     build:
       targets:
         VoiceVAC: all

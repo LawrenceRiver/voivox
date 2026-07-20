@@ -16,14 +16,13 @@ describe('build channel contract', () => {
     await Promise.all(temporaryRoots.splice(0).map((path) => rm(path, { force: true, recursive: true })));
   });
 
-  it('fails the Automation build when the driver is ready but its capability bytes are absent', async () => {
+  it('builds Automation when the real debugger driver is present in its worker', async () => {
     const result = await buildAutomationWith({
       automation: { driverReady: true },
       schemaVersion: 1
     });
 
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toContain('chrome.debugger');
+    expect(result.exitCode).toBe(0);
   });
 
   it.each([
@@ -37,13 +36,14 @@ describe('build channel contract', () => {
     expect(result.stderr).toContain('Invalid Voice VAC build channel contract');
   });
 
-  it('builds the explicit placeholder channel when driverReady is false', async () => {
+  it('fails closed when the placeholder contract is used with the real driver', async () => {
     const result = await buildAutomationWith({
       automation: { driverReady: false },
       schemaVersion: 1
     });
 
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain('placeholder');
   });
 
   it('rejects capability bytes while the Automation driver is still a placeholder', async () => {
@@ -58,7 +58,7 @@ describe('build channel contract', () => {
 
   it('rejects capability bytes injected into a non-worker Automation entry', async () => {
     const result = await buildAutomationWith({
-      automation: { driverReady: false },
+      automation: { driverReady: true },
       schemaVersion: 1
     }, 'popup');
 

@@ -21,6 +21,7 @@
     "test": "vitest run apps packages && node --test scripts/*.test.mjs",
     "test:watch": "vitest apps packages",
     "typecheck": "tsc -b",
+    "build:native": "bash scripts/build-native-app.sh",
     "build": "npm run build --workspaces --if-present",
     "release:test": "node --test scripts/release/*.test.mjs scripts/e2e/*.test.mjs",
     "release:preflight": "node scripts/release/preflight.mjs --json-output docs/evidence/release-0.2.0/environment.json"
