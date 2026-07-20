@@ -42,29 +42,21 @@ final class HoseRenderSession {
         visualSwayPhase = Double(seed & 0xFFFF) / Double(0xFFFF) * (.pi * 2)
     }
 
-    /// Publishes the short physical segment concealed beneath the docked nozzle.
+    /// Anchors the physical root at the centre of the capsule's dark port.
+    /// The stored length is intentionally invisible while docked, but the
+    /// moment the user pulls the mouth out, this exact point becomes the only
+    /// legitimate external outlet for the rendered tube.
     func dock(in nozzleFrame: CGRect) throws {
         dockFrame = nozzleFrame
         showsExternalHose = false
         let length = stowedActiveLength
-        let tip = SIMD3<Double>(nozzleFrame.midX, nozzleFrame.midY, 0)
-        // Place the stored tube just beyond the glass edge, left and slightly
-        // below the port. The slack bridge gives it a small folded C shape at
-        // rest while keeping it visibly in front of the capsule.
-        let root = SIMD3<Double>(
-            // Leave enough screen distance for real folds to breathe. Trying
-            // to pack a long bellows into a 100-point gap produces mesh
-            // self-intersections, which looks like a broken game prop.
-            tip.x - length * 0.74,
-            tip.y - length * 0.22,
-            0
-        )
-        rootGlobalPoint = CGPoint(x: root.x, y: root.y)
+        let outlet = SIMD3<Double>(nozzleFrame.midX, nozzleFrame.midY, 0)
+        rootGlobalPoint = CGPoint(x: outlet.x, y: outlet.y)
         let facingLeft = simd_quatd(angle: .pi, axis: SIMD3(0, 0, 1))
         let result = rod.configurePins(
-            rootPosition: root,
+            rootPosition: outlet,
             rootOrientation: facingLeft,
-            tipPosition: tip,
+            tipPosition: outlet,
             tipOrientation: facingLeft,
             activeLength: length
         )

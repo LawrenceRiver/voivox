@@ -60,6 +60,23 @@ final class HoseRigControllerTests: XCTestCase {
         XCTAssertGreaterThan(session.rod.activeLength, session.rod.configuration.naturalSegmentLength * 7.5)
     }
 
+    @MainActor
+    func testVisualDeploymentStartsExactlyAtTheGlassPortHole() throws {
+        let source = HoseRenderSnapshotSource()
+        let session = HoseRenderSession(source: source, seed: 91)
+        let portFrame = CGRect(x: 300, y: 120, width: 96, height: 96)
+
+        try session.dock(in: portFrame)
+        try session.deployVisual(toward: CGPoint(x: 860, y: 430))
+
+        let renderedRoot = try XCTUnwrap(source.latest?.centerline.first)
+        // Screen paths are converted to metres for Metal, but their first
+        // rendered ring must still be the physical centre of the dark port —
+        // never the old off-capsule storage point.
+        XCTAssertEqual(renderedRoot.x, Float(portFrame.midX / 1_000), accuracy: 0.000_01)
+        XCTAssertEqual(renderedRoot.y, Float(portFrame.midY / 1_000), accuracy: 0.000_01)
+    }
+
     func testDynamicBellowsUsesActualPathLengthInsteadOfCollapsingSkinBones() {
         let geometry = HoseBellowsGeometry.make(
             centerline: [
@@ -109,15 +126,15 @@ final class HoseRigControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testDockPlacesTheStowedCorrugationsOutsideTheGlassPort() throws {
+    func testDockAnchorsTheStoredHoseAtTheGlassPortCenter() throws {
         let session = HoseRenderSession(source: HoseRenderSnapshotSource(), seed: 84)
         let portFrame = CGRect(x: 0, y: 0, width: 96, height: 96)
 
         try session.dock(in: portFrame)
 
         let root = try XCTUnwrap(session.rootGlobalPoint)
-        XCTAssertLessThan(root.x, portFrame.minX)
-        XCTAssertLessThan(root.y, portFrame.minY)
+        XCTAssertEqual(root.x, portFrame.midX, accuracy: 0.001)
+        XCTAssertEqual(root.y, portFrame.midY, accuracy: 0.001)
     }
 
     @MainActor
