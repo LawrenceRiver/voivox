@@ -46,6 +46,44 @@ final class NozzleInteractionTests: XCTestCase {
         XCTAssertEqual(NozzleDragCoordinator.mouthRotation(dragProgress: 1), .pi / 2, accuracy: 0.0001)
     }
 
+    func testDragDirectionTurnsThe3DNozzleInsteadOfLeavingItInOneFixedDirection() async throws {
+        let device = VoiceVACDeviceInteractionController()
+        _ = try await device.loadNozzleClone()
+        let runtime = VoiceVACInteractionRuntime(
+            store: VoiceVACStore(),
+            hoseSession: nil,
+            deviceController: device,
+            sessionTokenProvider: UnavailableCrossWindowSessionTokenProvider(),
+            dockPoint: .zero
+        )
+
+        runtime.prepareVisualDeployment(at: CGPoint(x: 180, y: 0))
+        let eastRotation = try XCTUnwrap(device.nozzleEntity).transform.rotation
+        runtime.prepareVisualDeployment(at: CGPoint(x: 0, y: 180))
+        let northRotation = try XCTUnwrap(device.nozzleEntity).transform.rotation
+
+        XCTAssertLessThan(abs(simd_dot(eastRotation.vector, northRotation.vector)), 0.99)
+    }
+
+    func testHoseTerminatesAtTheRearCylinderRatherThanUnderTheNozzle() throws {
+        let source = HoseRenderSnapshotSource()
+        let session = HoseRenderSession(source: source, seed: 194)
+        try session.dock(in: CGRect(x: -48, y: -48, width: 96, height: 96))
+        let runtime = VoiceVACInteractionRuntime(
+            store: VoiceVACStore(),
+            hoseSession: session,
+            deviceController: VoiceVACDeviceInteractionController(),
+            sessionTokenProvider: UnavailableCrossWindowSessionTokenProvider(),
+            dockPoint: .zero
+        )
+
+        runtime.prepareVisualDeployment(at: CGPoint(x: 0, y: -300))
+
+        let endpoint = try XCTUnwrap(source.latest?.centerline.last)
+        XCTAssertEqual(endpoint.x, 0, accuracy: 0.000_01)
+        XCTAssertEqual(endpoint.y, -0.272, accuracy: 0.000_01)
+    }
+
     func testDoubleClickTimelineIsDeterministicAndUsesFourOrderedStages() {
         let animator = NozzleURLAnimator()
         XCTAssertEqual(animator.timeline.map(\.stage), [

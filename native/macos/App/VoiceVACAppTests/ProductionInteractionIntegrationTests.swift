@@ -158,7 +158,17 @@ final class ProductionInteractionIntegrationTests: XCTestCase {
         runtime.prepareVisualDeployment(at: CGPoint(x: 420, y: 260))
 
         let root = try XCTUnwrap(session.rootGlobalPoint)
-        let span = hypot(420 - root.x, 260 - root.y)
+        let nozzleCenter = CGPoint(x: 420, y: 260)
+        let distance = hypot(nozzleCenter.x - root.x, nozzleCenter.y - root.y)
+        let tangent = CGVector(
+            dx: (nozzleCenter.x - root.x) / distance,
+            dy: (nozzleCenter.y - root.y) / distance
+        )
+        let rearCylinder = NozzlePresentationKinematics.rearCylinderPoint(
+            forNozzleCenter: nozzleCenter,
+            hoseTangent: tangent
+        )
+        let span = hypot(rearCylinder.x - root.x, rearCylinder.y - root.y)
         XCTAssertGreaterThanOrEqual(session.rod.activeLength, span * 1.18)
         XCTAssertEqual(presenter.nozzleMoves.last?.center, CGPoint(x: 420, y: 260))
         XCTAssertTrue(presenter.nozzleMoves.last?.showsCloseButton ?? false)

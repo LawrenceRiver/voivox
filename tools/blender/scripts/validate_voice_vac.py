@@ -37,12 +37,15 @@ REQUIRED_OBJECTS = {
 }
 REQUIRED_JOINTS = [f"VAC_HOSE_JOINT_{index:02d}" for index in range(64)]
 REQUIRED_MATERIALS = {
-    "MAT_PEARL_PLASTIC",
-    "MAT_PEARL_RIBBED",
+    "MAT_TOY_IVORY",
+    "MAT_TOY_IVORY_RIBBED",
     "MAT_CHARCOAL_RUBBER",
     "MAT_BUTTON_RED",
     "MAT_MOUTH_DARK",
+    "MAT_EYE_WHITE",
+    "MAT_EYE_DARK",
 }
+REQUIRED_TOY_EYES = {"VAC_NOZZLE_EYE_L", "VAC_NOZZLE_EYE_R"}
 REQUIRED_MESH_OBJECTS = {
     "VAC_PORT",
     "VAC_NOZZLE_TIP",
@@ -354,6 +357,9 @@ def validate_scene(check: Validation) -> dict[str, int]:
     object_names = {obj.name for obj in bpy.data.objects}
     missing_objects = REQUIRED_OBJECTS - object_names
     check.require(not missing_objects, f"missing required scene nodes: {sorted(missing_objects)}")
+
+    missing_eyes = REQUIRED_TOY_EYES - object_names
+    check.require(not missing_eyes, f"missing toy eye meshes: {sorted(missing_eyes)}")
 
     for name in REQUIRED_OBJECTS:
         check.require(sum(obj.name == name for obj in bpy.data.objects) == 1, f"scene node {name} must exist exactly once")

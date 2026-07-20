@@ -77,6 +77,16 @@ final class RealityAssetContractTests: XCTestCase {
 
         XCTAssertFalse(contract.materials.contains("MAT_BRASS_ACCENT"))
         XCTAssertFalse(contract.materials.contains { $0.localizedCaseInsensitiveContains("brass") })
+        XCTAssertTrue(contract.materials.contains("MAT_TOY_IVORY"))
+        XCTAssertTrue(contract.materials.contains("MAT_TOY_IVORY_RIBBED"))
+    }
+
+    func testBundledNozzleHasTwoToyEyes() throws {
+        let nozzleURL = try XCTUnwrap(Bundle.main.url(forResource: "VoiceVACDevice", withExtension: "usdz"))
+        let usdText = try usdCat(nozzleURL)
+
+        XCTAssertTrue(usdText.contains("VAC_NOZZLE_EYE_L"))
+        XCTAssertTrue(usdText.contains("VAC_NOZZLE_EYE_R"))
     }
 
     func testBundledUSDZIntegrityHierarchyAndStaticRestPose() async throws {

@@ -4,6 +4,37 @@ import Foundation
 import simd
 import VoiceVACCore
 
+/// Screen-space relation between the user-held suction head and the hose.
+/// The point being dragged is the centre of the visible duckbill, while the
+/// tube must meet its exposed rear cylinder rather than disappear underneath
+/// the model. The default authored nozzle points downward on screen.
+enum NozzlePresentationKinematics {
+    static let rearCylinderOffset: CGFloat = 28
+
+    static func normalizedTangent(_ tangent: CGVector) -> CGVector {
+        let length = hypot(tangent.dx, tangent.dy)
+        guard length > 0.000_1 else { return CGVector(dx: 0, dy: -1) }
+        return CGVector(dx: tangent.dx / length, dy: tangent.dy / length)
+    }
+
+    static func rearCylinderPoint(
+        forNozzleCenter center: CGPoint,
+        hoseTangent: CGVector
+    ) -> CGPoint {
+        let tangent = normalizedTangent(hoseTangent)
+        return CGPoint(
+            x: center.x - tangent.dx * rearCylinderOffset,
+            y: center.y - tangent.dy * rearCylinderOffset
+        )
+    }
+
+    static func screenRotation(forHoseTangent tangent: CGVector) -> CGFloat {
+        let tangent = normalizedTangent(tangent)
+        let rawAngle = atan2(tangent.dy, tangent.dx) + .pi / 2
+        return atan2(sin(rawAngle), cos(rawAngle))
+    }
+}
+
 @MainActor
 final class NozzleDragCoordinator: NSObject, NSDraggingSource {
     typealias DeploymentHandler = @MainActor (_ point: CGPoint, _ progress: CGFloat, _ tangent: CGVector) -> Void
@@ -133,7 +164,16 @@ final class NozzleDragCoordinator: NSObject, NSDraggingSource {
         )
         guard let hoseSession else { return }
         do {
-            try hoseSession.deployVisual(toward: point)
+            try hoseSession.deployVisual(
+                toward: NozzlePresentationKinematics.rearCylinderPoint(
+                    forNozzleCenter: point,
+                    hoseTangent: tangent
+                ),
+                orientation: simd_quatd(
+                    angle: Double(NozzlePresentationKinematics.screenRotation(forHoseTangent: tangent)),
+                    axis: SIMD3(0, 0, 1)
+                )
+            )
             lastSimulationError = nil
         } catch {
             lastSimulationError = error

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import simd
 import VoiceVACCore
 
 @MainActor
@@ -151,9 +152,19 @@ final class VoiceVACInteractionRuntime {
                 dy: (point.y - dockPoint.y) / distance
             )
             : CGVector(dx: 0, dy: 1)
-        try? hoseSession?.deployVisual(toward: point)
+        try? hoseSession?.deployVisual(
+            toward: NozzlePresentationKinematics.rearCylinderPoint(
+                forNozzleCenter: point,
+                hoseTangent: tangent
+            ),
+            orientation: simd_quatd(
+                angle: Double(NozzlePresentationKinematics.screenRotation(forHoseTangent: tangent)),
+                axis: SIMD3(0, 0, 1)
+            )
+        )
         try? deviceController.applyNozzleDragProgress(
-            min(max(distance / 120, 0), 1)
+            min(max(distance / 120, 0), 1),
+            hoseTangent: tangent
         )
         presenter?.moveNozzlePanel(
             center: point,
@@ -176,7 +187,10 @@ final class VoiceVACInteractionRuntime {
             dockPoint: dockPoint,
             deploymentHandler: { [weak self] point, progress, tangent in
                 guard let self else { return }
-                try? deviceController.applyNozzleDragProgress(progress)
+                try? deviceController.applyNozzleDragProgress(
+                    progress,
+                    hoseTangent: tangent
+                )
                 presenter?.moveNozzlePanel(
                     center: point,
                     hoseTangent: tangent,
@@ -274,7 +288,10 @@ final class VoiceVACInteractionRuntime {
         }
         let distance = hypot(frame.nozzlePoint.x - dockPoint.x, frame.nozzlePoint.y - dockPoint.y)
         let progress = min(max(distance / 120, 0), 1)
-        try? deviceController.applyNozzleDragProgress(progress)
+        try? deviceController.applyNozzleDragProgress(
+            progress,
+            hoseTangent: frame.hoseTangent
+        )
         presenter?.moveNozzlePanel(
             center: frame.nozzlePoint,
             hoseTangent: frame.hoseTangent,

@@ -28,11 +28,13 @@ from mathutils import Matrix, Vector
 SCHEMA_VERSION = 2
 JOINT_NAMES = [f"VAC_HOSE_JOINT_{index:02d}" for index in range(64)]
 MATERIAL_NAMES = [
-    "MAT_PEARL_PLASTIC",
-    "MAT_PEARL_RIBBED",
+    "MAT_TOY_IVORY",
+    "MAT_TOY_IVORY_RIBBED",
     "MAT_CHARCOAL_RUBBER",
     "MAT_BUTTON_RED",
     "MAT_MOUTH_DARK",
+    "MAT_EYE_WHITE",
+    "MAT_EYE_DARK",
 ]
 RUNTIME_NODES = [
     "VAC_DEVICE_ROOT",
@@ -164,26 +166,25 @@ def create_material(
 
 def build_materials() -> dict[str, bpy.types.Material]:
     return {
-        "MAT_PEARL_PLASTIC": create_material(
-            "MAT_PEARL_PLASTIC",
-            (0.91, 0.875, 0.79, 1.0),
+        "MAT_TOY_IVORY": create_material(
+            "MAT_TOY_IVORY",
+            (0.70, 0.64, 0.52, 1.0),
             metallic=0.02,
-            roughness=0.24,
-            coat_weight=0.34,
-            coat_roughness=0.16,
+            roughness=0.31,
+            coat_weight=0.27,
+            coat_roughness=0.19,
             subsurface_weight=0.025,
             handmade_bump=0.055,
         ),
-        "MAT_PEARL_RIBBED": create_material(
-            "MAT_PEARL_RIBBED",
-            # The bellows must read as warm white plastic at desktop scale.
-            # A darker beige looks elegant in Blender but turns into black
-            # stripes when only the ridge valleys are visible in Metal.
-            (0.93, 0.91, 0.84, 1.0),
+        "MAT_TOY_IVORY_RIBBED": create_material(
+            "MAT_TOY_IVORY_RIBBED",
+            # Warm cream must survive the white desktop without becoming a
+            # bright yellow toy or a grey technical conduit.
+            (0.73, 0.68, 0.57, 1.0),
             metallic=0.0,
-            roughness=0.38,
-            coat_weight=0.16,
-            coat_roughness=0.26,
+            roughness=0.41,
+            coat_weight=0.14,
+            coat_roughness=0.29,
             subsurface_weight=0.018,
             handmade_bump=0.075,
         ),
@@ -210,6 +211,22 @@ def build_materials() -> dict[str, bpy.types.Material]:
             (0.0025, 0.0018, 0.0014, 1.0),
             metallic=0.0,
             roughness=0.78,
+        ),
+        "MAT_EYE_WHITE": create_material(
+            "MAT_EYE_WHITE",
+            (0.90, 0.89, 0.84, 1.0),
+            metallic=0.0,
+            roughness=0.18,
+            coat_weight=0.46,
+            coat_roughness=0.08,
+        ),
+        "MAT_EYE_DARK": create_material(
+            "MAT_EYE_DARK",
+            (0.004, 0.006, 0.009, 1.0),
+            metallic=0.0,
+            roughness=0.13,
+            coat_weight=0.58,
+            coat_roughness=0.06,
         ),
     }
 
@@ -454,7 +471,7 @@ def build_device(
     port = lathe_mesh(
         "VAC_PORT",
         port_profile,
-        materials["MAT_PEARL_PLASTIC"],
+        materials["MAT_TOY_IVORY"],
         collection,
         radial_ripple=0.003,
         ripple_count=24,
@@ -502,7 +519,7 @@ def build_device(
             (-0.078, 0.074, 0.025, 4.6, 0.0005),
             (-0.093, 0.083, 0.0225, 5.0, 0.0),
         ],
-        materials["MAT_PEARL_PLASTIC"],
+        materials["MAT_TOY_IVORY"],
         collection,
         segments=56,
         cap_start=True,
@@ -530,7 +547,7 @@ def build_device(
         back_y=-0.090,
         outer=(0.087, 0.0265, 5.2),
         inner=(0.0755, 0.0165, 4.8),
-        material=materials["MAT_PEARL_PLASTIC"],
+        material=materials["MAT_TOY_IVORY"],
         collection=collection,
     )
     parent(nozzle_tip, nozzle)
@@ -558,6 +575,45 @@ def build_device(
         collection=collection,
     )
     parent(mouth, nozzle)
+
+    # Two compact 3D eyes live on the upper face of the duckbill. They are
+    # authored meshes rather than a 2D overlay, so they rotate with the head
+    # while dragging and remain legible in the detached RealityKit panel.
+    eye_profile = [
+        (-0.010, 0.001),
+        (-0.007, 0.006),
+        (-0.002, 0.010),
+        (0.004, 0.010),
+        (0.008, 0.006),
+        (0.011, 0.001),
+    ]
+    pupil_profile = [
+        (-0.0048, 0.001),
+        (-0.0032, 0.0038),
+        (0.0000, 0.0052),
+        (0.0032, 0.0038),
+        (0.0048, 0.001),
+    ]
+    for side, suffix in ((-1.0, "L"), (1.0, "R")):
+        eye = lathe_mesh(
+            f"VAC_NOZZLE_EYE_{suffix}",
+            eye_profile,
+            materials["MAT_EYE_WHITE"],
+            collection,
+            segments=40,
+        )
+        eye.location = (side * 0.027, -0.089, 0.019)
+        parent(eye, nozzle)
+
+        pupil = lathe_mesh(
+            f"VAC_NOZZLE_PUPIL_{suffix}",
+            pupil_profile,
+            materials["MAT_EYE_DARK"],
+            collection,
+            segments=32,
+        )
+        pupil.location = (side * 0.027, -0.100, 0.019)
+        parent(pupil, nozzle)
 
     button_base = lathe_mesh(
         "VAC_BUTTON_BASE",
@@ -606,7 +662,7 @@ def build_device(
     ready_light = lathe_mesh(
         "VAC_BUTTON_READY_LIGHT",
         [(-0.021, 0.051), (-0.024, 0.054), (-0.028, 0.054), (-0.031, 0.051)],
-        materials["MAT_PEARL_PLASTIC"],
+        materials["MAT_TOY_IVORY"],
         collection,
         segments=80,
         cap_start=False,
@@ -741,7 +797,7 @@ def build_hose(
         vertices,
         faces,
         uvs,
-        materials["MAT_PEARL_RIBBED"],
+        materials["MAT_TOY_IVORY_RIBBED"],
         collection,
     )
     skin.parent = armature

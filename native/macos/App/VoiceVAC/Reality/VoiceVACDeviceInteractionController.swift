@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 import RealityKit
 import simd
 import VoiceVACCore
@@ -165,14 +166,23 @@ final class VoiceVACDeviceInteractionController {
         recenterNozzlePresentation()
     }
 
-    func applyNozzleDragProgress(_ rawProgress: CGFloat) throws {
+    func applyNozzleDragProgress(
+        _ rawProgress: CGFloat,
+        hoseTangent: CGVector = CGVector(dx: 0, dy: -1)
+    ) throws {
         guard let nozzleEntity else {
             throw VoiceVACDeviceInteractionError.missingEntity("VAC_NOZZLE")
         }
         let progress = Float(min(max(rawProgress, 0), 1))
         let docked = try requiredTransform(for: .nozzleDocked)
         let deployed = try requiredTransform(for: .nozzleDeployed)
-        nozzleEntity.transform = Self.interpolate(from: docked, to: deployed, progress: progress)
+        var transformed = Self.interpolate(from: docked, to: deployed, progress: progress)
+        let dragRotation = simd_quatf(
+            angle: Float(NozzlePresentationKinematics.screenRotation(forHoseTangent: hoseTangent)),
+            axis: SIMD3(0, 0, 1)
+        )
+        transformed.rotation = simd_normalize(transformed.rotation * dragRotation)
+        nozzleEntity.transform = transformed
         recenterNozzlePresentation()
     }
 

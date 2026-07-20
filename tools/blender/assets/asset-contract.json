@@ -35,16 +35,16 @@
   ],
   "exports": {
     "VoiceVACDevice.usdz": {
-      "byteCount": 387680,
-      "sha256": "3bbacac212e74f30933c79f64839d64c9b85dd244d6fbff00988527aab541573"
+      "byteCount": 418492,
+      "sha256": "7643b8f588402768f56e3f14f43da91745f5bd948f61e6c658ce161c89e3313e"
     },
     "VoiceVACHose.meshbin": {
       "byteCount": 814808,
-      "sha256": "804957206485e17aa47a9ce0c40fb9e75679b62efb8c692a235d869fd6bc767b"
+      "sha256": "442d31151de888b47a1971156a6b0a6fc4fe9d61c967a4849599eef457b69662"
     },
     "VoiceVACHose.usdz": {
-      "byteCount": 830433,
-      "sha256": "1b5e84999465ef634df611009bdcd2848d9cf8f997cb34b7ae3bf96a35954ba7"
+      "byteCount": 830441,
+      "sha256": "cdfd18599b0abd5f28bf3e00fcbbe90b04b107d9d3a29006e16afc8c134e85ea"
     }
   },
   "hoseRuntime": {
@@ -95,7 +95,7 @@
       "matrixLayout": "columnMajor4x4",
       "maxInfluencesPerVertex": 2,
       "normalComponentType": "float32",
-      "payloadSHA256": "823fcc33be3b6513da3f2daa049236019185295559b728a79152c529abfea562",
+      "payloadSHA256": "3f8d1a0b811a107459766f750d827f0616183947badbec463cf6c030b4c23307",
       "positionComponentType": "float32",
       "schema": "VoiceVACHoseMesh",
       "sections": {
@@ -110,7 +110,7 @@
         "positionsOffset": 160,
         "textureCoordinatesOffset": 210544
       },
-      "sha256": "804957206485e17aa47a9ce0c40fb9e75679b62efb8c692a235d869fd6bc767b",
+      "sha256": "442d31151de888b47a1971156a6b0a6fc4fe9d61c967a4849599eef457b69662",
       "textureCoordinateComponentType": "float32",
       "version": 1,
       "vertexCount": 8766
@@ -220,7 +220,7 @@
       ],
       "min": [
         -0.192171,
-        -0.1406,
+        -0.1418,
         -0.085
       ]
     },
@@ -256,7 +256,7 @@
       ],
       "min": [
         -0.087,
-        -0.1036,
+        -0.1048,
         -0.03584
       ]
     },
@@ -293,13 +293,19 @@
       "MAT_BUTTON_RED"
     ],
     "VAC_BUTTON_READY_LIGHT": [
-      "MAT_PEARL_PLASTIC"
+      "MAT_TOY_IVORY"
     ],
     "VAC_HOSE_SKIN": [
-      "MAT_PEARL_RIBBED"
+      "MAT_TOY_IVORY_RIBBED"
     ],
     "VAC_NOZZLE_COLLAR": [
       "MAT_CHARCOAL_RUBBER"
+    ],
+    "VAC_NOZZLE_EYE_L": [
+      "MAT_EYE_WHITE"
+    ],
+    "VAC_NOZZLE_EYE_R": [
+      "MAT_EYE_WHITE"
     ],
     "VAC_NOZZLE_GASKET": [
       "MAT_CHARCOAL_RUBBER"
@@ -307,28 +313,36 @@
     "VAC_NOZZLE_MOUTH": [
       "MAT_MOUTH_DARK"
     ],
+    "VAC_NOZZLE_PUPIL_L": [
+      "MAT_EYE_DARK"
+    ],
+    "VAC_NOZZLE_PUPIL_R": [
+      "MAT_EYE_DARK"
+    ],
     "VAC_NOZZLE_SHELL": [
-      "MAT_PEARL_PLASTIC"
+      "MAT_TOY_IVORY"
     ],
     "VAC_NOZZLE_TIP": [
-      "MAT_PEARL_PLASTIC"
+      "MAT_TOY_IVORY"
     ],
     "VAC_PORT": [
-      "MAT_PEARL_PLASTIC"
+      "MAT_TOY_IVORY"
     ],
     "VAC_PORT_SOCKET": [
       "MAT_MOUTH_DARK"
     ]
   },
   "materials": [
-    "MAT_PEARL_PLASTIC",
-    "MAT_PEARL_RIBBED",
+    "MAT_TOY_IVORY",
+    "MAT_TOY_IVORY_RIBBED",
     "MAT_CHARCOAL_RUBBER",
     "MAT_BUTTON_RED",
-    "MAT_MOUTH_DARK"
+    "MAT_MOUTH_DARK",
+    "MAT_EYE_WHITE",
+    "MAT_EYE_DARK"
   ],
   "meshStats": {
-    "meshCount": 11,
+    "meshCount": 15,
     "perMesh": {
       "VAC_BUTTON_BASE": {
         "polygons": 1040,
@@ -355,6 +369,16 @@
         "triangles": 384,
         "vertices": 256
       },
+      "VAC_NOZZLE_EYE_L": {
+        "polygons": 280,
+        "triangles": 480,
+        "vertices": 242
+      },
+      "VAC_NOZZLE_EYE_R": {
+        "polygons": 280,
+        "triangles": 480,
+        "vertices": 242
+      },
       "VAC_NOZZLE_GASKET": {
         "polygons": 224,
         "triangles": 448,
@@ -364,6 +388,16 @@
         "polygons": 56,
         "triangles": 56,
         "vertices": 57
+      },
+      "VAC_NOZZLE_PUPIL_L": {
+        "polygons": 192,
+        "triangles": 320,
+        "vertices": 162
+      },
+      "VAC_NOZZLE_PUPIL_R": {
+        "polygons": 192,
+        "triangles": 320,
+        "vertices": 162
       },
       "VAC_NOZZLE_SHELL": {
         "polygons": 504,
@@ -386,9 +420,9 @@
         "vertices": 449
       }
     },
-    "polygons": 14392,
-    "triangles": 28216,
-    "vertices": 14421
+    "polygons": 15336,
+    "triangles": 29816,
+    "vertices": 15229
   },
   "nominalDockTransform": {
     "rotationQuaternion": [
@@ -441,7 +475,7 @@
   "product": "Voice VAC",
   "reproducibility": {
     "mode": "semantic-contract-v1",
-    "sceneSemanticSHA256": "649d99c847588614f4c2cbac7668cd2a704341f51c31673ce4344e3a06ad01f3",
+    "sceneSemanticSHA256": "dcbc9771b43a2d66d734cb1450c2372f38d79a420b2e871a4cd93b925d214fc4",
     "statement": "Normalized scene semantics are reproducible; Blender and USD container bytes are not promised identical."
   },
   "runtimeNodes": [
@@ -720,8 +754,8 @@
     "weightedVertexCount": 8766
   },
   "sourceHashes": {
-    "build_voice_vac.py": "0001607b66a0644013254e3ac88ec21a80e3e220b9fd8d2307e040500e597441",
-    "voice-vac-machine.blend": "a279915a6273ac9e5551bb8b39d06ee4b6b5e34de40d1dc9c94c29b14226985c"
+    "build_voice_vac.py": "0e52f8b8f5f973ab06b9f68f49812686f51f06d3c35fd5fd323ba2c36062a2b6",
+    "voice-vac-machine.blend": "801cb4fb350b846cc30a3e630e2d83662e58303f97c8f7bd502692bc57df5e14"
   },
   "units": {
     "linear": "meter",

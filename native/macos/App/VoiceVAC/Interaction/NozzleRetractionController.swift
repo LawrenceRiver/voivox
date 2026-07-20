@@ -98,10 +98,13 @@ final class NozzleRetractionController {
                 try hoseSession.restoreDockedPose()
             } else {
                 try hoseSession.updateDeployment(
-                    tipGlobalPoint: frame.nozzlePoint,
+                    tipGlobalPoint: NozzlePresentationKinematics.rearCylinderPoint(
+                        forNozzleCenter: frame.nozzlePoint,
+                        hoseTangent: frame.hoseTangent
+                    ),
                     activeLength: frame.activeLength,
                     orientation: simd_quatd(
-                        angle: Double(frame.mouthRotation),
+                        angle: Double(NozzlePresentationKinematics.screenRotation(forHoseTangent: frame.hoseTangent)),
                         axis: SIMD3(0, 0, 1)
                     )
                 )
